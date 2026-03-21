@@ -1,0 +1,7 @@
+id,name,lat_deg,lon_deg,alt_km,min_elevation_deg
+GS-001,IIT Delhi,28.5459,77.1926,0.22,5.0
+GS-002,Bangalore ISRO,12.9716,77.5946,0.92,5.0
+GS-003,Trivandrum VSSC,8.5241,76.9366,0.03,5.0
+GS-004,Mauritius,-20.1609,57.4977,0.02,5.0
+GS-005,Biak Indonesia,-0.9145,134.9098,0.01,5.0
+GS-006,Svalbard,78.2292,15.4031,0.04,5.0
