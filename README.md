@@ -1,5 +1,5 @@
 # AETHER — Autonomous Constellation Manager
-### NSH 2026 · IIT Delhi · Judged by ISRO Scientists
+### NSH 2026 · IIT Delhi
 
 ---
 
