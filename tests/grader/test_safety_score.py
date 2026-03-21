@@ -1,5 +1,5 @@
-"""
-Safety Score tests — 25% of total grader score.
+﻿"""
+Safety Score tests â€” 25% of total grader score.
 Tests autonomous collision avoidance: CDM detection, evasion burn scheduling,
 and correct handling of non-threatening debris.
 """
@@ -44,8 +44,8 @@ class TestSafetyScore:
             f"Expected CDM (warning or critical) for converging debris at 0.5 km miss, "
             f"got active_cdm_warnings={status['active_cdm_warnings']}, "
             f"critical_conjunctions={status['critical_conjunctions']}. "
-            "DIAGNOSIS: conjunction.py KDTree screening may have wrong threshold. "
-            "FIX: CDM must be generated when predicted miss < 5 km within TCA window."
+            "Check: conjunction.py KDTree screening may have wrong threshold. "
+            "Requirement: CDM must be generated when predicted miss < 5 km within TCA window."
         )
 
     def test_evasion_burn_scheduled(self, session, reset_state):
@@ -78,8 +78,8 @@ class TestSafetyScore:
             f"Expected maneuver to be queued or executed after CDM detection. "
             f"maneuvers_queued={status['maneuvers_queued']}, "
             f"maneuvers_executed={step_body.get('maneuvers_executed', 0)}. "
-            "DIAGNOSIS: avoidance.py _schedule_evasion() may not be wired into step loop. "
-            "FIX: After CDM is raised, call avoidance planner to schedule an evasion burn."
+            "Check: avoidance.py _schedule_evasion() may not be wired into step loop. "
+            "Requirement: After CDM is raised, call avoidance planner to schedule an evasion burn."
         )
 
     def test_no_cdm_on_diverging_debris(self, session, reset_state):
@@ -101,8 +101,8 @@ class TestSafetyScore:
         assert status["active_cdm_warnings"] == 0, (
             f"Expected 0 CDM warnings for diverging debris at 200 km, "
             f"got {status['active_cdm_warnings']}. "
-            "DIAGNOSIS: Conjunction screening is triggering false positives. "
-            "FIX: Filter diverging objects using relative velocity dot product."
+            "Check: Conjunction screening is triggering false positives. "
+            "Requirement: Filter diverging objects using relative velocity dot product."
         )
 
     def test_critical_conjunction_threshold(self, session, reset_state):
@@ -127,8 +127,8 @@ class TestSafetyScore:
         assert status["critical_conjunctions"] > 0, (
             f"Expected critical_conjunctions > 0 for near-collision geometry, "
             f"got {status['critical_conjunctions']}. "
-            "DIAGNOSIS: CDM raised but not escalated to critical_conjunctions. "
-            "FIX: If PoC > threshold or miss_km < COLLISION_KM, mark as critical."
+            "Check: CDM raised but not escalated to critical_conjunctions. "
+            "Requirement: If PoC > threshold or miss_km < COLLISION_KM, mark as critical."
         )
 
     def test_zero_collisions_safe_scenario(self, session, reset_state):
@@ -148,7 +148,8 @@ class TestSafetyScore:
         assert status["total_collisions"] == 0, (
             f"Expected 0 total_collisions for well-separated constellation, "
             f"got {status['total_collisions']}. "
-            "DIAGNOSIS: Walker Delta spacing may be too tight, or collision "
+            "Check: Walker Delta spacing may be too tight, or collision "
             "detection threshold is too large. "
-            "FIX: Ensure 50-sat Walker constellation has adequate separation (>10 km)."
+            "Requirement: Ensure 50-sat Walker constellation has adequate separation (>10 km)."
         )
+

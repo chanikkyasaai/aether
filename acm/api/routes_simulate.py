@@ -68,6 +68,78 @@ def _process_due_maneuvers(dt: float):
     return len(executed)
 
 
+def _compute_los_windows_batch():
+    """
+    Compute ground-station blackout windows for all satellites over the next 3 hours.
+    Vectorized: LOS check is computed for ALL (M, N_GS) pairs in one NumPy call per step.
+    Uses rk4_serial for the propagation loop (no thread overhead for N≤50).
+    Stores result in sim_state.sat_los_cache = {sat_id: [{start_s, end_s}, ...]}
+    """
+    from acm.core.ground_station import GROUND_STATIONS
+    from acm.core.physics import rk4_serial as _rk4_serial
+
+    M = sim_state.sat_states.shape[0]
+    if M == 0 or not GROUND_STATIONS:
+        sim_state.sat_los_cache = {}
+        return
+
+    HORIZON_S = 10800.0   # 3 hours
+    CHECK_STEP_S = 300.0  # 5-minute intervals
+    n_steps = int(HORIZON_S / CHECK_STEP_S)
+
+    # Pre-build (N_GS, 3) ground station ECEF matrix and min-elevation thresholds
+    gs_ecef = np.array([gs.ecef for gs in GROUND_STATIONS])          # (G, 3)
+    gs_min_elev = np.array([gs.min_elevation_deg for gs in GROUND_STATIONS])  # (G,)
+
+    def _has_los_vectorized(sat_positions: np.ndarray) -> np.ndarray:
+        """Return (M,) bool array: True if satellite has LOS to ANY ground station."""
+        # sat_positions: (M, 3), gs_ecef: (G, 3)
+        # range_vec: (M, G, 3)
+        range_vec = sat_positions[:, np.newaxis, :] - gs_ecef[np.newaxis, :, :]
+        gs_unit = gs_ecef / np.linalg.norm(gs_ecef, axis=1, keepdims=True)  # (G, 3)
+        range_norm = np.linalg.norm(range_vec, axis=2)  # (M, G)
+        range_norm = np.maximum(range_norm, 1e-9)
+        # dot product of range_vec with gs_unit: (M, G)
+        dot = np.einsum('mgk,gk->mg', range_vec, gs_unit)
+        sin_elev = dot / range_norm  # (M, G)
+        elev_deg = np.degrees(np.arcsin(np.clip(sin_elev, -1.0, 1.0)))  # (M, G)
+        # satellite has LOS if elevation >= min_elevation for ANY station
+        return np.any(elev_deg >= gs_min_elev[np.newaxis, :], axis=1)  # (M,)
+
+    states = sim_state.sat_states.copy()
+    current_t = sim_state.current_time_s
+
+    # Initial LOS state (vectorized)
+    has_los_init = _has_los_vectorized(states[:, :3])
+    in_blackout = ~has_los_init                # (M,) bool
+    blackout_start = np.full(M, current_t)     # (M,) float
+    windows = [[] for _ in range(M)]
+
+    t = current_t
+    for _ in range(n_steps):
+        states = _rk4_serial(states, CHECK_STEP_S)
+        t += CHECK_STEP_S
+        has_los = _has_los_vectorized(states[:, :3])  # (M,) vectorized
+
+        # Blackout ends: was in blackout, now has LOS
+        ended = in_blackout & has_los
+        for i in np.where(ended)[0]:
+            windows[i].append({'start_s': float(blackout_start[i]), 'end_s': t})
+        in_blackout[ended] = False
+
+        # Blackout starts: was not in blackout, now no LOS
+        started = ~in_blackout & ~has_los
+        blackout_start[started] = t
+        in_blackout[started] = True
+
+    # Close any still-open blackout windows
+    for i in range(M):
+        if in_blackout[i]:
+            windows[i].append({'start_s': float(blackout_start[i]), 'end_s': current_t + HORIZON_S})
+
+    sim_state.sat_los_cache = {sim_state.sat_ids[i]: windows[i] for i in range(M)}
+
+
 def _check_collisions_during_propagation(states_before: np.ndarray, states_after: np.ndarray):
     """
     Check for any satellite-debris distance < COLLISION_THRESHOLD_KM during propagation.
@@ -154,7 +226,10 @@ def simulate_step(req: SimulateStepRequest):
         # 10. Rebuild debris snapshot cache (amortizes ECI→geodetic cost across snapshot calls)
         sim_state.rebuild_debris_cache()
 
-        # 11. Compute new timestamp
+        # 11. Compute ground station LOS/blackout windows for Gantt visualization
+        _compute_los_windows_batch()
+
+        # 12. Compute new timestamp
         from datetime import datetime, timezone
         new_ts = sim_state.initial_epoch + timedelta(seconds=sim_state.current_time_s)
         new_ts_iso = new_ts.strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'

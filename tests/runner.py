@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
 AETHER Test Suite Runner
 ========================
@@ -20,7 +20,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 
-# ── Grader category definitions ───────────────────────────────────────────────
+# â”€â”€ Grader category definitions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 CATEGORIES = [
     {
@@ -61,14 +61,14 @@ CATEGORIES = [
     },
     {
         "name": "Scenarios",
-        "weight": 0.00,  # informational — not in explicit grader breakdown
+        "weight": 0.00,  # informational â€” not in explicit grader breakdown
         "paths": ["tests/scenarios/"],
         "description": "End-to-end: basic / fleet / edge cases / stress",
     },
 ]
 
 
-# ── Server health check ───────────────────────────────────────────────────────
+# â”€â”€ Server health check â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def check_server(base_url: str) -> bool:
     """Return True if the server is reachable and healthy."""
@@ -76,7 +76,7 @@ def check_server(base_url: str) -> bool:
         r = requests.get(f"{base_url}/api/status", timeout=5)
         if r.status_code == 200:
             body = r.json()
-            print(f"  Server OK — system={body.get('system', '?')}, "
+            print(f"  Server OK â€” system={body.get('system', '?')}, "
                   f"sats={body.get('satellites_tracked', '?')}, "
                   f"debris={body.get('debris_tracked', '?')}")
             return True
@@ -88,7 +88,7 @@ def check_server(base_url: str) -> bool:
         return False
 
 
-# ── Pytest runner ─────────────────────────────────────────────────────────────
+# â”€â”€ Pytest runner â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def run_category(category: dict, base_url: str, verbose: bool,
                  include_slow: bool) -> dict:
@@ -169,17 +169,17 @@ def run_category(category: dict, base_url: str, verbose: bool,
     }
 
 
-# ── Score display ─────────────────────────────────────────────────────────────
+# â”€â”€ Score display â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-def print_separator(char="─", width=72):
+def print_separator(char="â”€", width=72):
     print(char * width)
 
 
 def print_score_summary(results: list):
     print()
-    print_separator("═")
+    print_separator("â•")
     print("  AETHER GRADER SCORE SUMMARY")
-    print_separator("═")
+    print_separator("â•")
 
     total_weighted = 0.0
     total_weight = 0.0
@@ -198,7 +198,7 @@ def print_score_summary(results: list):
         if weight > 0:
             total_weight += weight
 
-        bar = "█" * int(rate / 10) + "░" * (10 - int(rate / 10))
+        bar = "â–ˆ" * int(rate / 10) + "â–‘" * (10 - int(rate / 10))
         skipped = res.get("skipped", 0)
         skip_note = f" (+{skipped} skipped)" if skipped else ""
 
@@ -221,7 +221,7 @@ def print_score_summary(results: list):
 
     print(f"  ESTIMATED TOTAL SCORE:  {total_weighted*100:.1f}% "
           f"(normalised to weighted categories: {normalised*100:.1f}%)")
-    print_separator("═")
+    print_separator("â•")
 
     # Per-category details
     print()
@@ -240,7 +240,7 @@ def print_score_summary(results: list):
     print()
 
 
-# ── Main ──────────────────────────────────────────────────────────────────────
+# â”€â”€ Main â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def main():
     parser = argparse.ArgumentParser(description="AETHER test suite runner")
@@ -256,11 +256,11 @@ def main():
 
     print()
     print("=" * 72)
-    print("  AETHER NSH 2026 — Test Suite Runner")
+    print("  AETHER NSH 2026 â€” Test Suite Runner")
     print("=" * 72)
     print()
 
-    # ── Step 1: Server health check ──────────────────────────────────────────
+    # â”€â”€ Step 1: Server health check â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     print("Step 1: Checking server health...")
     server_ok = check_server(args.url)
     if not server_ok:
@@ -271,7 +271,7 @@ def main():
         sys.exit(1)
     print()
 
-    # ── Step 2: Run tests by category ───────────────────────────────────────
+    # â”€â”€ Step 2: Run tests by category â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     print("Step 2: Running test categories...")
     print()
 
@@ -293,11 +293,11 @@ def main():
                            include_slow=not args.no_slow)
         results.append((cat, res))
         status = "OK" if res["failed"] == 0 and res["error"] == 0 else "FAILURES"
-        print(f"    → {res['passed']}/{res['total']} passed [{status}] "
+        print(f"    â†’ {res['passed']}/{res['total']} passed [{status}] "
               f"in {res.get('elapsed_s', 0):.1f}s")
         print()
 
-    # ── Step 3: Print score summary ──────────────────────────────────────────
+    # â”€â”€ Step 3: Print score summary â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     print("Step 3: Score summary")
     print_score_summary(results)
 
@@ -310,3 +310,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

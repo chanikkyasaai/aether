@@ -1,5 +1,5 @@
-"""
-Uptime Score tests — 15% of total grader score.
+﻿"""
+Uptime Score tests â€” 15% of total grader score.
 Tests server reliability under sequential load, concurrent requests, and large payloads.
 """
 import time
@@ -30,7 +30,7 @@ class TestUptimeScore:
         assert len(failures) == 0, (
             f"{len(failures)} out of 100 status requests failed:\n"
             + "\n".join(failures[:10]) +
-            "\nFIX: Server must remain stable under sequential read load."
+            "\nRequirement: Server must remain stable under sequential read load."
         )
 
     def test_concurrent_status_requests(self, session, reset_state):
@@ -56,11 +56,11 @@ class TestUptimeScore:
 
         assert len(errors) == 0, (
             f"Concurrent status errors: {errors}. "
-            "FIX: Server must handle concurrent reads without threading issues."
+            "Requirement: Server must handle concurrent reads without threading issues."
         )
         assert all(s == 200 for s in results), (
             f"Not all 20 concurrent status requests returned 200: {results}. "
-            "FIX: FastAPI should handle concurrent GET requests without blocking."
+            "Requirement: FastAPI should handle concurrent GET requests without blocking."
         )
         assert len(results) == 20, f"Only {len(results)}/20 requests completed."
 
@@ -78,7 +78,7 @@ class TestUptimeScore:
         assert len(failures) == 0, (
             f"{len(failures)}/50 step requests failed:\n"
             + "\n".join(failures[:10]) +
-            "\nFIX: Server must handle rapid sequential step requests without crash."
+            "\nRequirement: Server must handle rapid sequential step requests without crash."
         )
 
     @pytest.mark.slow
@@ -93,7 +93,7 @@ class TestUptimeScore:
         r = session.post(f"{BASE_URL}/api/telemetry", json=payload, timeout=120)
         assert r.status_code != 500, (
             f"Server returned 500 for 10000 debris ingestion: {r.text[:200]}. "
-            "FIX: Handle large batch ingestion without memory or processing errors."
+            "Requirement: Handle large batch ingestion without memory or processing errors."
         )
         assert r.status_code == 200, (
             f"Expected 200 for 10000 debris, got {r.status_code}: {r.text[:200]}."
@@ -140,7 +140,7 @@ class TestUptimeScore:
 
         assert len(errors) == 0, (
             f"Concurrent request errors: {errors}. "
-            "FIX: Protect shared state with a lock in routes_telemetry.py."
+            "Requirement: Protect shared state with a lock in routes_telemetry.py."
         )
         assert tel_result and tel_result[0] == 200, (
             f"Telemetry POST failed: {tel_result}."
@@ -148,3 +148,4 @@ class TestUptimeScore:
         assert sta_result and sta_result[0] == 200, (
             f"Status GET failed: {sta_result}."
         )
+

@@ -1,5 +1,5 @@
-"""
-GET /api/visualization/snapshot — Contract tests matching grader specification.
+﻿"""
+GET /api/visualization/snapshot â€” Contract tests matching grader specification.
 """
 import pytest
 import sys
@@ -42,7 +42,7 @@ class TestSnapshot:
         assert len(body.get("satellites", [])) == 3, (
             f"Expected 3 satellite entries in snapshot, got "
             f"{len(body.get('satellites', []))}. "
-            "FIX: Snapshot must reflect all ingested satellites."
+            "Requirement: Snapshot must reflect all ingested satellites."
         )
 
     def test_snapshot_lat_lon_range(self, session, reset_state):
@@ -57,11 +57,11 @@ class TestSnapshot:
         for sat in body["satellites"]:
             assert -90.0 <= sat["lat"] <= 90.0, (
                 f"SAT {sat['id']} lat={sat['lat']} is out of [-90, 90]. "
-                "FIX: ECI-to-geodetic conversion is incorrect."
+                "Requirement: ECI-to-geodetic conversion is incorrect."
             )
             assert -180.0 <= sat["lon"] <= 180.0, (
                 f"SAT {sat['id']} lon={sat['lon']} is out of [-180, 180]. "
-                "FIX: ECI-to-geodetic conversion produces wrong longitude."
+                "Requirement: ECI-to-geodetic conversion produces wrong longitude."
             )
 
     def test_snapshot_fuel_positive(self, session, reset_state):
@@ -76,7 +76,7 @@ class TestSnapshot:
         for sat in body["satellites"]:
             assert sat["fuel_kg"] >= 0.0, (
                 f"SAT {sat['id']} fuel_kg={sat['fuel_kg']} is negative. "
-                "FIX: Fuel must never go below 0."
+                "Requirement: Fuel must never go below 0."
             )
 
     def test_snapshot_status_valid(self, session, reset_state):
@@ -93,7 +93,7 @@ class TestSnapshot:
             assert sat["status"] in valid_statuses, (
                 f"SAT {sat['id']} has invalid status '{sat['status']}'. "
                 f"Valid values: {valid_statuses}. "
-                "FIX: SatelliteStatus enum must match the grader's expected values."
+                "Requirement: SatelliteStatus enum must match the grader's expected values."
             )
 
     def test_debris_cloud_format(self, session, reset_state):
@@ -107,7 +107,7 @@ class TestSnapshot:
         assert len(entry) == 4, (
             f"debris_cloud entry must have 4 elements [id, lat, lon, alt_km], "
             f"got {len(entry)}: {entry}. "
-            "FIX: Format debris as [id_str, lat_float, lon_float, alt_km_float]."
+            "Requirement: Format debris as [id_str, lat_float, lon_float, alt_km_float]."
         )
         assert isinstance(entry[0], str), f"entry[0] (id) must be str, got {type(entry[0])}."
         assert -90.0 <= entry[1] <= 90.0, f"lat {entry[1]} out of range."
@@ -123,7 +123,7 @@ class TestSnapshot:
         sat0 = next(s for s in snap0["satellites"] if s["id"] == "SAT-01")
         lat0, lon0 = sat0["lat"], sat0["lon"]
 
-        post_step(session, 300)  # 5-minute step — large enough to see movement
+        post_step(session, 300)  # 5-minute step â€” large enough to see movement
 
         snap1 = get_snapshot(session).json()
         sat1 = next(s for s in snap1["satellites"] if s["id"] == "SAT-01")
@@ -133,7 +133,7 @@ class TestSnapshot:
         assert position_changed, (
             f"Satellite position unchanged after 300 s step: "
             f"before=({lat0:.4f}, {lon0:.4f}), after=({lat1:.4f}, {lon1:.4f}). "
-            "FIX: /simulate/step must propagate orbital state and update ECI positions."
+            "Requirement: /simulate/step must propagate orbital state and update ECI positions."
         )
 
     def test_50_sat_snapshot_count(self, session, reset_state):
@@ -143,5 +143,6 @@ class TestSnapshot:
         count = len(body.get("satellites", []))
         assert count == 50, (
             f"Expected 50 satellite entries, got {count}. "
-            "FIX: All 50 ingested satellites must appear in the snapshot."
+            "Requirement: All 50 ingested satellites must appear in the snapshot."
         )
+

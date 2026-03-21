@@ -1,4 +1,4 @@
-"""
+﻿"""
 Fleet-level scenarios.
 Tests Walker Delta constellation behaviour: tracking, fuel accounting, maneuver lifecycle.
 """
@@ -19,13 +19,13 @@ from tests.conftest import (
 class TestScenarioFleet:
 
     def test_50_satellite_walker_delta(self, session, reset_state):
-        """Load 50 Walker Delta satellites → status.satellites_tracked must equal 50."""
+        """Load 50 Walker Delta satellites â†’ status.satellites_tracked must equal 50."""
         load_constellation_50(session, n_debris=0)
         status = get_status(session).json()
         assert status["satellites_tracked"] == 50, (
             f"Expected satellites_tracked=50 after Walker Delta load, "
             f"got {status['satellites_tracked']}. "
-            "FIX: All 50 satellites in the Walker Delta must be ingested and tracked."
+            "Requirement: All 50 satellites in the Walker Delta must be ingested and tracked."
         )
 
     @pytest.mark.slow
@@ -46,8 +46,8 @@ class TestScenarioFleet:
         assert status["total_collisions"] == 0, (
             f"Expected 0 collisions after 10 steps with well-separated constellation, "
             f"got {status['total_collisions']}. "
-            "DIAGNOSIS: Walker Delta satellites may be initialised too close together. "
-            "FIX: Ensure RAAN spacing is 72° and in-plane spacing is 36°."
+            "Check: Walker Delta satellites may be initialised too close together. "
+            "Requirement: Ensure RAAN spacing is 72Â° and in-plane spacing is 36Â°."
         )
 
     @pytest.mark.slow
@@ -67,12 +67,12 @@ class TestScenarioFleet:
         final_fuel = final_status["fleet_fuel_remaining_kg"]
 
         assert final_fuel <= initial_fuel, (
-            f"Fleet fuel increased after steps: {initial_fuel:.2f} → {final_fuel:.2f} kg. "
-            "FIX: Fuel must only ever decrease — check fuel update logic in step handler."
+            f"Fleet fuel increased after steps: {initial_fuel:.2f} â†’ {final_fuel:.2f} kg. "
+            "Requirement: Fuel must only ever decrease â€” check fuel update logic in step handler."
         )
         assert final_fuel >= 0.0, (
             f"Fleet fuel went negative: {final_fuel:.2f} kg. "
-            "FIX: Clamp individual satellite fuel to 0."
+            "Requirement: Clamp individual satellite fuel to 0."
         )
 
     @pytest.mark.slow
@@ -103,7 +103,7 @@ class TestScenarioFleet:
             "Expected maneuvers_queued > 0 after scheduling burns."
         )
 
-        # Run 5 steps of 60 s each → all 3 burns should have fired by t=300s
+        # Run 5 steps of 60 s each â†’ all 3 burns should have fired by t=300s
         for _ in range(5):
             post_step(session, 60)
 
@@ -111,5 +111,6 @@ class TestScenarioFleet:
         assert final_status["maneuvers_queued"] == 0, (
             f"Expected maneuvers_queued=0 after all burns executed, "
             f"got {final_status['maneuvers_queued']}. "
-            "FIX: Remove executed burns from the queue in routes_simulate.py."
+            "Requirement: Remove executed burns from the queue in routes_simulate.py."
         )
+

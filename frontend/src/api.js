@@ -56,8 +56,8 @@ export function useActiveCDMs(status) {
   // Extract CDMs from recent events
   const cdms = []
   if (status && status.recent_events) {
-    // Build CDM list from status — in real system this would be a dedicated endpoint
-    // For now parse from recent events
+    // Build CDM list from recent status events.
+    // A dedicated CDM endpoint can replace this parser without changing component APIs.
     for (const ev of status.recent_events) {
       if (ev.event_type === 'CDM_DETECTED' || ev.event_type === 'CDM_ACTIONED') {
         cdms.push({

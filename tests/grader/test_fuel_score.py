@@ -1,5 +1,5 @@
-"""
-Fuel Score tests — 20% of total grader score.
+﻿"""
+Fuel Score tests â€” 20% of total grader score.
 Tests fuel efficiency: initial fuel accounting, burn accuracy, and non-negativity.
 """
 import math
@@ -19,7 +19,7 @@ from tests.conftest import (
 class TestFuelScore:
 
     def test_initial_fuel_50kg(self, session, reset_state):
-        """Freshly ingested satellite must have exactly 50.0 kg fuel (±0.1 kg)."""
+        """Freshly ingested satellite must have exactly 50.0 kg fuel (Â±0.1 kg)."""
         state = circular_orbit_state(CONSTELLATION_ALT)
         post_telemetry(session, [state_to_obj("SAT-FUEL-01", "SATELLITE", state)])
 
@@ -27,8 +27,8 @@ class TestFuelScore:
         sat = next((s for s in snap["satellites"] if s["id"] == "SAT-FUEL-01"), None)
         assert sat is not None, "SAT-FUEL-01 not found in snapshot after ingestion."
         assert abs(sat["fuel_kg"] - M_FUEL) < 0.1, (
-            f"Initial fuel_kg={sat['fuel_kg']:.3f}, expected {M_FUEL:.1f} ± 0.1 kg. "
-            "FIX: Set satellite initial fuel to M_FUEL=50.0 kg on ingestion."
+            f"Initial fuel_kg={sat['fuel_kg']:.3f}, expected {M_FUEL:.1f} Â± 0.1 kg. "
+            "Requirement: Set satellite initial fuel to M_FUEL=50.0 kg on ingestion."
         )
 
     def test_fuel_decreases_after_burn(self, session, reset_state):
@@ -47,7 +47,7 @@ class TestFuelScore:
             "burnTime": "2026-03-12T08:00:15.000Z",
             "deltaV_vector": {"x": 0.0, "y": 0.005, "z": 0.0}
         }])
-        post_step(session, 30)  # advance 30 s — burn fires at t+15
+        post_step(session, 30)  # advance 30 s â€” burn fires at t+15
 
         snap1 = get_snapshot(session).json()
         fuel_after = next(
@@ -55,9 +55,9 @@ class TestFuelScore:
         )
         assert fuel_after < fuel_before, (
             f"Fuel did not decrease: before={fuel_before:.4f}, after={fuel_after:.4f} kg. "
-            "DIAGNOSIS: routes_simulate.py _process_due_maneuvers may not be calling "
+            "Check: routes_simulate.py _process_due_maneuvers may not be calling "
             "tsiolkovsky_dm or updating satellite.fuel_kg. "
-            "FIX: Subtract dm=tsiolkovsky_dm(wet_mass, dv_magnitude) after each burn."
+            "Requirement: Subtract dm=tsiolkovsky_dm(wet_mass, dv_magnitude) after each burn."
         )
 
     def test_fuel_never_negative(self, session, reset_state):
@@ -65,7 +65,7 @@ class TestFuelScore:
         state = circular_orbit_state(CONSTELLATION_ALT)
         post_telemetry(session, [state_to_obj("SAT-FUEL-01", "SATELLITE", state)])
 
-        # Schedule many small burns — total fuel cost < 50 kg
+        # Schedule many small burns â€” total fuel cost < 50 kg
         burns = [
             {
                 "burn_id": f"B{i:03d}",
@@ -83,7 +83,7 @@ class TestFuelScore:
         for sat in snap["satellites"]:
             assert sat["fuel_kg"] >= 0.0, (
                 f"SAT {sat['id']} has fuel_kg={sat['fuel_kg']:.4f} < 0. "
-                "FIX: Clamp fuel to 0 and cancel remaining burns when fuel exhausted."
+                "Requirement: Clamp fuel to 0 and cancel remaining burns when fuel exhausted."
             )
 
     def test_tsiolkovsky_fuel_accuracy(self, session, reset_state):
@@ -113,13 +113,13 @@ class TestFuelScore:
         dm_expected = tsiolkovsky_dm(M_WET, dv)
 
         if dm_actual <= 0:
-            pytest.skip("Burn did not execute — cannot verify Tsiolkovsky accuracy.")
+            pytest.skip("Burn did not execute â€” cannot verify Tsiolkovsky accuracy.")
 
         rel_err = abs(dm_actual - dm_expected) / dm_expected
         assert rel_err < 0.01, (
             f"Fuel consumed {dm_actual:.5f} kg, Tsiolkovsky predicts {dm_expected:.5f} kg. "
             f"Relative error {rel_err*100:.2f}% exceeds 1% limit. "
-            "FIX: Use exact Tsiolkovsky: dm = m_wet * (1 - exp(-dv / (ISP * G0)))."
+            "Requirement: Use exact Tsiolkovsky: dm = m_wet * (1 - exp(-dv / (ISP * G0)))."
         )
 
     def test_eol_triggered_at_25kg(self, session, reset_state):
@@ -129,10 +129,10 @@ class TestFuelScore:
         This test checks that the EOL threshold is enforced.
         """
         # We can only test this via the API by burning down fuel
-        # Schedule 9 × 1 m/s burns to exhaust most of the 50 kg budget
-        # 9 × tsiolkovsky_dm(550, 0.001) ≈ 9 × 0.187 = 1.68 kg — keep as proxy
+        # Schedule 9 Ã— 1 m/s burns to exhaust most of the 50 kg budget
+        # 9 Ã— tsiolkovsky_dm(550, 0.001) â‰ˆ 9 Ã— 0.187 = 1.68 kg â€” keep as proxy
         # Instead, schedule burns totalling just below 50 kg
-        # tsiolkovsky_dm(550, dv) ≈ 47.6 kg consumed for dv large enough
+        # tsiolkovsky_dm(550, dv) â‰ˆ 47.6 kg consumed for dv large enough
         # Use 14 m/s (0.014 km/s) which consumes ~2.6 kg leaving ~47.4 kg... still too much
         # Practical approach: check EOL appears in valid status set
         state = circular_orbit_state(CONSTELLATION_ALT)
@@ -149,3 +149,4 @@ class TestFuelScore:
         assert sat["status"] in valid_statuses, (
             f"Status '{sat['status']}' not in valid set {valid_statuses}."
         )
+

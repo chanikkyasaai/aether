@@ -1,5 +1,5 @@
-"""
-GET /api/status — System health endpoint tests matching grader specification.
+﻿"""
+GET /api/status â€” System health endpoint tests matching grader specification.
 """
 import pytest
 import sys
@@ -35,11 +35,11 @@ class TestStatus:
             assert field in body, (
                 f"Required field '{field}' missing from /api/status response. "
                 f"Response keys: {list(body.keys())}. "
-                f"FIX: Add '{field}' to StatusResponse schema."
+                f"Requirement: Add '{field}' to StatusResponse schema."
             )
             assert isinstance(body[field], expected_type), (
                 f"Field '{field}' has type {type(body[field])}, expected {expected_type}. "
-                f"FIX: Ensure correct type for '{field}'."
+                f"Requirement: Ensure correct type for '{field}'."
             )
 
     def test_satellites_tracked_matches_ingested(self, session, reset_state):
@@ -53,7 +53,7 @@ class TestStatus:
         status = get_status(session).json()
         assert status["satellites_tracked"] == 10, (
             f"Expected satellites_tracked=10, got {status['satellites_tracked']}. "
-            "FIX: Count satellites correctly in state and expose via /api/status."
+            "Requirement: Count satellites correctly in state and expose via /api/status."
         )
 
     def test_debris_tracked_matches_ingested(self, session, reset_state):
@@ -67,7 +67,7 @@ class TestStatus:
         status = get_status(session).json()
         assert status["debris_tracked"] == 200, (
             f"Expected debris_tracked=200, got {status['debris_tracked']}. "
-            "FIX: Count debris correctly in state and expose via /api/status."
+            "Requirement: Count debris correctly in state and expose via /api/status."
         )
 
     def test_initial_collision_count_zero(self, session, reset_state):
@@ -75,18 +75,18 @@ class TestStatus:
         status = get_status(session).json()
         assert status["total_collisions"] == 0, (
             f"Expected total_collisions=0 on fresh state, got {status['total_collisions']}. "
-            "FIX: Reset must zero out the collision counter."
+            "Requirement: Reset must zero out the collision counter."
         )
 
     def test_fleet_fuel_calculation(self, session, reset_state):
-        """50 freshly-ingested satellites → fleet_fuel_remaining_kg ≈ 50 × 50 = 2500 kg."""
+        """50 freshly-ingested satellites â†’ fleet_fuel_remaining_kg â‰ˆ 50 Ã— 50 = 2500 kg."""
         load_constellation_50(session, n_debris=0)
         status = get_status(session).json()
         expected = 50 * 50.0  # 2500 kg
         actual = status["fleet_fuel_remaining_kg"]
         assert abs(actual - expected) < 1.0, (
-            f"Expected fleet fuel ≈ {expected:.1f} kg, got {actual:.1f} kg. "
-            "FIX: Sum all satellite fuel_kg values for fleet_fuel_remaining_kg."
+            f"Expected fleet fuel â‰ˆ {expected:.1f} kg, got {actual:.1f} kg. "
+            "Requirement: Sum all satellite fuel_kg values for fleet_fuel_remaining_kg."
         )
 
     def test_recent_events_is_list(self, session, reset_state):
@@ -94,7 +94,7 @@ class TestStatus:
         body = get_status(session).json()
         assert isinstance(body.get("recent_events"), list), (
             f"recent_events must be a list, got {type(body.get('recent_events'))}. "
-            "FIX: Initialize recent_events as [] in state and return it in status."
+            "Requirement: Initialize recent_events as [] in state and return it in status."
         )
 
     def test_system_name(self, session, reset_state):
@@ -102,5 +102,6 @@ class TestStatus:
         body = get_status(session).json()
         assert body.get("system") == "AETHER", (
             f"system field must be 'AETHER', got '{body.get('system')}'. "
-            "FIX: Hardcode system='AETHER' in StatusResponse."
+            "Requirement: Hardcode system='AETHER' in StatusResponse."
         )
+

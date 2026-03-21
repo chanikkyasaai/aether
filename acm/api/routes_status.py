@@ -12,7 +12,7 @@ router = APIRouter()
 
 
 @router.get("/api/status", response_model=StatusResponse)
-async def get_status():
+def get_status():
     with sim_state.sim_lock:
         n_sats = len(sim_state.sat_ids)
         n_deb = len(sim_state.deb_ids)
@@ -46,6 +46,8 @@ async def get_status():
             for b in sim_state.maneuver_queue
         ]
 
+        los_windows = dict(sim_state.sat_los_cache)
+
         if sim_state.initial_epoch is not None:
             ts = sim_state.initial_epoch + timedelta(seconds=sim_state.current_time_s)
             ts_str = ts.strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
@@ -66,5 +68,6 @@ async def get_status():
         fleet_fuel_remaining_kg=round(fleet_fuel, 2),
         recent_events=recent,
         active_cdms=active_cdms_list,
-        scheduled_burns=scheduled_burns_list
+        scheduled_burns=scheduled_burns_list,
+        sat_los_windows=los_windows,
     )

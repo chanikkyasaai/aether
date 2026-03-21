@@ -58,8 +58,11 @@ def build_snapshot_cache(state) -> bytes:
 
 
 @router.get("/api/visualization/snapshot")
-async def get_snapshot():
-    """Return pre-serialized snapshot bytes. Zero Pydantic overhead."""
+def get_snapshot():
+    """Return pre-serialized snapshot bytes. Zero Pydantic overhead.
+    Plain def — runs in thread pool to avoid blocking asyncio event loop while
+    waiting for sim_state.sim_lock (held for ~500ms during simulate_step).
+    """
     with sim_state.sim_lock:
         cached = sim_state._snapshot_json_cache
     if cached:

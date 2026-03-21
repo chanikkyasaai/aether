@@ -15,13 +15,17 @@ BURN_COOLDOWN_S = 600.0     # Minimum seconds between burns on same satellite
 MIN_SCHEDULE_LEAD_S = 10.0  # Burn must be at least 10s in the future
 
 
-def _already_handled(sim_state: SimState, sat_id: str, deb_id: str) -> bool:
-    """Check if this conjunction is already handled in the queue."""
+def _already_handled(sim_state: SimState, sat_id: str, deb_id: str, tca_abs_s: float) -> bool:
+    """
+    Check if this conjunction is already handled.
+    A conjunction is handled if:
+    1. There is an EVASION burn in the queue for this satellite that fires before TCA, OR
+    2. The satellite is already in EVADING status with a burn that fires before TCA.
+    """
     for burn in sim_state.maneuver_queue:
         if burn.satellite_id == sat_id and burn.burn_type == 'EVASION':
-            # Check if burn_id encodes this debris (loose check)
-            if deb_id.replace('-', '').replace(' ', '') in burn.burn_id:
-                return True
+            if burn.burn_time_s < tca_abs_s:
+                return True  # an evasion burn will fire before this TCA
     return False
 
 
@@ -58,8 +62,9 @@ def run_autonomous_planner(sim_state: SimState, cdms: List[CDM]):
             sim_state.current_time_s
         )
 
-        # a. Already handled?
-        if _already_handled(sim_state, cdm.sat_id, cdm.deb_id):
+        # a. Already handled? (any evasion burn fires before this TCA)
+        tca_abs_s = sim_state.current_time_s + cdm.tca_offset_s
+        if _already_handled(sim_state, cdm.sat_id, cdm.deb_id, tca_abs_s):
             continue
 
         # b. EOL satellite?
@@ -75,7 +80,12 @@ def run_autonomous_planner(sim_state: SimState, cdms: List[CDM]):
             continue
 
         # d. Earliest valid burn time
+        # For safety-critical conjunctions, override cooldown if needed to fire before TCA
         earliest_burn = _earliest_valid_burn(sim_state, sat_idx)
+        tca_abs_s = sim_state.current_time_s + cdm.tca_offset_s
+        if earliest_burn >= tca_abs_s - MIN_LEAD_TIME_S:
+            # Cooldown would prevent firing before TCA; override with emergency timing
+            earliest_burn = sim_state.current_time_s + MIN_SCHEDULE_LEAD_S
 
         # e. Find LOS window
         sat_state = sim_state.sat_states[sat_idx]

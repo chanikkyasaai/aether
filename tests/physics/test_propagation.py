@@ -1,4 +1,4 @@
-"""
+﻿"""
 Orbital propagation correctness tests.
 Verifies the physics engine produces accurate results against known Keplerian predictions.
 """
@@ -33,7 +33,7 @@ class TestKeplerianOrbit:
         final = propagated[0]
 
         pos_error = np.linalg.norm(final[:3] - state[:3])
-        # J2 causes nodal regression (~7 deg/day at 53° incl, 550 km) producing
+        # J2 causes nodal regression (~7 deg/day at 53Â° incl, 550 km) producing
         # ~60-80 km position shift per orbit. Accept up to 120 km.
         assert pos_error < 120.0, (
             f"After one orbit, position error is {pos_error:.2f} km (expect < 120 km). "
@@ -52,7 +52,7 @@ class TestKeplerianOrbit:
 
         assert abs(v_final - v_init) < 0.01, (
             f"Speed changed from {v_init:.4f} to {v_final:.4f} km/s. "
-            f"Energy conservation violated — check J2 perturbation implementation."
+            f"Energy conservation violated â€” check J2 perturbation implementation."
         )
 
     def test_altitude_maintained(self):
@@ -98,7 +98,7 @@ class TestKeplerianOrbit:
         propagated = propagate(state.reshape(1, 6), 86400.0, step=30.0)
 
         # Check that position has drifted from pure Keplerian (J2 effect)
-        # J2 causes ~7 deg/day nodal regression for 53° incl at 550km
+        # J2 causes ~7 deg/day nodal regression for 53Â° incl at 550km
         init_pos = state[:3]
         final_pos = propagated[0, :3]
 
@@ -154,5 +154,6 @@ class TestRK4Integration:
         E1 = 0.5 * v1**2 - MU / r1
 
         assert abs(E1 - E0) < 0.05, (
-            f"Energy drift: {abs(E1-E0):.4f} km²/s². Expected < 0.05."
+            f"Energy drift: {abs(E1-E0):.4f} kmÂ²/sÂ². Expected < 0.05."
         )
+

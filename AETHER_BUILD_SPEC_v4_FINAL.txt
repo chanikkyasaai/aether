@@ -1,655 +1,0 @@
-﻿
-PROJECT
-AETHER
-
-
-Autonomous Constellation Manager
-Orbital Debris Avoidance · Conjunction Assessment · Autonomous Maneuver Planning
-Competition
-NSH 2026 · IIT DelhiJudges
-ISRO ScientistsDeadline
-02 April 2026Version
-v3.0  Final
-How to read this document
-This document is the single source of truth for building AETHER. Read it from beginning to end once before writing any code. It is structured as ten parts - from problem to physics to build sequence. Every decision is made. Every equation is written. Every file is named. Nothing is left for the builder to guess. If this document says X, build X.
-
-
-PART I
-IThe Problem
-Why this system needs to exist and what ISRO judges care about
-1.1  The world that created this problem
-Over the last decade, Low Earth Orbit transformed from a frontier into a highway. Commercial mega-constellations multiplied active payloads exponentially. Alongside them: millions of pieces of debris - defunct rocket bodies, shattered solar panels, stray bolts - all orbiting at hypervelocity speeds exceeding 27,000 km/h.
-
-This is Donald Kessler's nightmare made real. The Kessler Syndrome: a single collision at these speeds generates a shrapnel cloud that triggers cascading further collisions. Because kinetic energy scales with v², even a centimetre-sized fragment destroys a satellite and instantly creates thousands of new tracked debris pieces. A chain reaction, once started, cannot be stopped. LEO becomes permanently unusable.
-
-◆INSIGHT: What ISRO actually cares about
-ISRO's NETRA project handles collision avoidance manually. The Debris Free Space Mission (2024) targets zero new debris generation by Indian actors by 2030. The judges in the room are people who do this work today. They are not evaluating a student project - they are evaluating a potential tool.
-1.2  Why the current approach is broken
-BottleneckWhy it breaks at scaleScalabilityManual evaluation cannot scale. A constellation of 50 satellites may face 100+ conjunction warnings per day. Thousands of satellites face tens of thousands. There are not enough human operators.Communication blackoutsSatellites pass over oceans where no ground station has line-of-sight. If a conjunction is predicted while a satellite is in blackout, ground control is helpless. The maneuver command cannot be uplinked.Fuel sub-optimalityHuman operators plan individual burns reactively. They cannot globally optimize ΔV across a fleet of 50 satellites simultaneously. Fuel in space cannot be replenished. Wasted ΔV shortens mission lifetime.Response latencyA Conjunction Data Message is issued. Analysts evaluate it. Hours pass. The window to act may be closing. An autonomous system acts in seconds.
-1.3  The problem statement - precisely
-Build an Autonomous Constellation Manager (ACM) for a fleet of 50+ satellites in a debris field of 10,000+ objects. The system must:
-
-  ▸  Ingest high-frequency orbital telemetry (ECI state vectors) via REST API on port 8000.
-  ▸  Screen for conjunctions - predict collisions up to 24 hours ahead - without O(N²) computation.
-  ▸  Autonomously calculate and schedule collision avoidance burns when miss distance < 100 m is predicted.
-  ▸  Execute station-keeping recovery: return each satellite to its nominal orbital slot after an evasion burn.
-  ▸  Track propellant strictly via Tsiolkovsky rocket equation. Schedule graveyard orbit at 5% fuel remaining.
-  ▸  Serve a real-time 2D operational dashboard - the Orbital Insight Visualizer - for human oversight.
-  ▸  Package everything in a single Docker container on ubuntu:22.04, binding to 0.0.0.0:8000.
-
-1.4  How it is scored
-CriterionWeightGraded byWhat determines this scoreSafety Score25%AutoZero collisions in 24h run. Every critical conjunction resolved with correct burn.Fuel Efficiency20%AutoTotal ΔV consumed fleet-wide. SLSQP optimal burns save ~30-40% vs greedy.Constellation Uptime15%AutoTime each satellite spends within 10 km of nominal slot. Exponential penalty per second outside.Algorithmic Speed15%AutoResponse time of /api/simulate/step. Must be <500 ms for 50 sats + 10k debris.UI/UX & Visualization15%ManualAll 4 dashboard panels working. 60 fps with 10k+ debris. Situational awareness clear.Code Quality & Logging10%ManualStructured maneuver audit log. Modular architecture. LaTeX technical report.
-
-PART II
-IIThe Idea
-What we decided to build and why
-2.1  The central idea in one paragraph
-AETHER is a ground-based Autonomous Constellation Manager that runs on a server and communicates with a simulation grader via REST API. It maintains an in-memory model of the entire orbital environment - 50 satellites and 10,000 debris - propagates all objects forward in time using J2-perturbed Runge-Kutta 4th order integration, screens for conjunctions using a KD-tree spatial index, and when it finds a critical conjunction, calculates the minimum-fuel evasion burn using constrained optimisation, schedules it subject to ground station line-of-sight constraints, and plans the Hohmann recovery transfer back to the satellite's nominal slot. All of this happens autonomously, in milliseconds, for every object, every time the simulation advances.
-
-2.2  What makes this design win
-DecisionWhat we choseWhy this beats the alternativesPropagatorCustom RK4 + J2 via Numba JITSGP4 is tied to TLE format - useless here. We receive raw ECI state vectors. Custom RK4 lets us control accuracy, batch shape, and JIT compile exactly the hot loop.Conjunction screeningKD-tree + golden-section TCA searchNaïve O(N²) = 500,000 pairs per tick. KD-tree reduces to O(N log N) build + O(M·k·log N) query (k≈10). 100× faster. Golden-section finds exact TCA without brute time-stepping.Collision metricAkella-Alfriend Probability of CollisionRaw miss distance ignores relative velocity. 90m miss at 0.5 km/s is safe. 90m miss at 14 km/s is catastrophic. PoC captures this. This is what real CDMs use.Maneuver planningSLSQP constrained minimisationGreedy prograde burn wastes fuel. SLSQP finds the minimum ΔV that satisfies the standoff constraint. ~30-40% fuel savings. Literature-validated approach.Recovery maneuverTwo-burn Hohmann phasingSingle retrograde burn returns altitude but not phase. Lambert solver is correct but complex to implement robustly. Hohmann phasing is the industry-standard, analytically clean, and verifiable.State managementIn-memory NumPy arraysNo database needed - state resets every Docker run. In-memory is fastest. NumPy dtype arrays give batch-compatible shapes for Numba.Frontend renderingdeck.gl on WebGLDOM manipulation fails at 10k objects. deck.gl renders 100k+ points at 60fps via GPU. ScatterplotLayer + LineLayer handles the full debris cloud.
-
-PART III
-IIIThe Design
-System architecture, data flow, and layout
-3.1  System overview
-One process. One port. No database. No message queue. No microservices. FastAPI handles the REST layer. NumPy/Numba handles the physics. The React frontend polls the API. Everything runs inside one Docker container.
-
-3.2  The three layers
-LayerComponentsWhat it doesAPI LayerFastAPI · Pydantic v2 · UvicornReceives telemetry, validates schemas, routes to core modules, returns JSON responses. Plain def routes for CPU-bound endpoints (simulate/step). Async def for lightweight I/O routes.Core Layerphysics · state · conjunction · maneuver · planner · station_keeping · ground_station · eol · loggerThe intelligence of the system. In-memory SimState is the single source of truth. All modules read and write through it with a threading.Lock().Frontend LayerReact 18 · deck.gl · D3 · SVGFour-panel 2D dashboard. Polls /api/visualization/snapshot at 10 Hz for positions. Polls /api/status at 2 Hz for CDMs and burn schedule.
-3.3  Request flow - /api/simulate/step in exact sequence
-  1.  HTTP POST arrives. FastAPI routes to plain def handler in a thread pool (not async - this is CPU-bound).
-  2.  Acquire sim_lock. process_due_maneuvers(sim_state, dt): apply any burns in [now, now+dt]. Apply ΔV. Run Tsiolkovsky. Mark cooldown. Release lock after.
-  3.  rk4_batch(all_states, dt): propagate ALL satellites + ALL debris in one vectorized Numba call. One (M+N, 6) array goes in. One (M+N, 6) array comes out. No Python loop over objects.
-  4.  sim_state.current_time_s += dt. Update ISO timestamp.
-  5.  screen_conjunctions(): KD-tree coarse filter → coarse sweep → golden-section TCA → Akella-Alfriend PoC. Returns CDM list sorted by PoC descending.
-  6.  run_autonomous_planner(cdms): for each CRITICAL CDM, compute optimal evasion + recovery burns, check LOS, schedule if valid. Log every decision.
-  7.  eol.check(sim_state): for any satellite at ≤2.5 kg fuel, schedule graveyard maneuver, move to debris catalog.
-  8.  Return: {status, new_timestamp, collisions_detected, maneuvers_executed}.
-
-3.4  Complete file tree - every file named
-Build exactly this structure. No additions. No renamings. Every file below must exist.
-
-acm/                                  Root package
-  core/physics.py                     RK4+J2 propagator · Tsiolkovsky · Numba JIT  [CRITICAL]
-  core/state.py                       SimState dataclass · threading.Lock · all runtime state  [CRITICAL]
-  core/conjunction.py                 KD-tree · TCA search · Akella-Alfriend PoC · CDM dataclass  [CRITICAL]
-  core/maneuver.py                    RTN↔ECI · SLSQP evasion · Hohmann recovery  [CRITICAL]
-  core/planner.py                     Autonomous decision engine - CDMs → burn schedule  [CRITICAL]
-  core/station_keeping.py             Nominal slot propagation · recovery trigger  [SCORE]
-  core/ground_station.py              LOS elevation check · blackout window predictor  [CRITICAL]
-  core/eol.py                         Fuel monitor · graveyard maneuver at ≤2.5 kg  [SCORE]
-  core/logger.py                      Structured audit log · 10 event types · JSONL output  [REQUIRED]
-  api/main.py                         FastAPI app · lifespan Numba warmup · CORS · StaticFiles  [CRITICAL]
-  api/routes_telemetry.py             POST /api/telemetry  [CRITICAL]
-  api/routes_maneuver.py              POST /api/maneuver/schedule  [CRITICAL]
-  api/routes_simulate.py              POST /api/simulate/step  [plain def - NOT async]  [CRITICAL]
-  api/routes_viz.py                   GET /api/visualization/snapshot  [CRITICAL]
-  api/routes_status.py                GET /api/status  [REQUIRED]
-  api/schemas.py                      All Pydantic v2 models  [CRITICAL]
-  data/ground_stations.csv            Six stations as given in PS
-  data/constellation_init.py          50 satellite ECI states at 550 km + DEMO_MODE seed
-frontend/src/App.jsx                  Four-panel CSS Grid dashboard shell
-frontend/src/GroundTrack.jsx          deck.gl Mercator + CDM threat overlay
-frontend/src/BullseyePlot.jsx         SVG polar chart - TCA vs azimuth
-frontend/src/FuelHeatmap.jsx          50-satellite CSS Grid fuel gauges
-frontend/src/GanttTimeline.jsx        D3 horizontal burn schedule
-frontend/src/OrbitView3D.jsx          Three.js 3D globe - ECI coords · Earth texture · debris cloud · burn vector
-frontend/src/api.js                   Snapshot + status polling hooks
-Dockerfile                            ubuntu:22.04 · port 8000 · 0.0.0.0 - HARD REQUIREMENT  [CRITICAL]
-requirements.txt                      Pinned versions
-report/report.tex                     LaTeX technical report
-logs/acm_audit.jsonl                  Written at runtime by logger.py
-
-
-PART IV
-IVThe Tech Stack
-Every technology chosen, every alternative rejected, every reason given
-4.1  Backend stack - Python
-LibraryVersionRoleWhy this, not alternativesFastAPI0.115.0API frameworkFastest Python API framework. Auto-generates OpenAPI docs. Pydantic v2 validation. Used by Microsoft, Netflix, Uber in production.Uvicorn0.30.0ASGI serverSub-millisecond request handling. Works with FastAPI natively. Single-worker sufficient - state is in-memory, no shared state needed across processes.Pydantic2.7.0Schema validationv2 is 5-17× faster than v1. All request/response models validated at boundary. Catches malformed inputs before they corrupt sim_state.NumPy1.26.4Array computationThe physics engine operates on (N, 6) arrays. NumPy vectorized operations on large arrays are C-speed. All state stored as NumPy arrays - no Python object overhead in the hot loop.Numba0.60.0JIT compilationReleases Python GIL. Compiles RK4 loop to native machine code via LLVM. @njit(parallel=True, nogil=True) runs per-object loop iterations on multiple CPU cores simultaneously.SciPy1.13.0Optimisation + spatialKDTree for conjunction screening. minimize_scalar (golden-section) for TCA. minimize with SLSQP for optimal ΔV. All from one trusted library.scikit-learn1.5.0Backup KD-treesklearn.neighbors.KDTree has a slightly different API to scipy - kept as fallback if scipy KDTree has edge cases. Remove if not needed.
-⚠CRITICAL: async def on CPU-bound routes
-The /api/simulate/step endpoint runs Numba JIT computation that can take hundreds of milliseconds. If declared as async def, this blocks the entire FastAPI event loop and all other requests stall behind it. Declare it as plain def. FastAPI automatically offloads plain def routes to a thread pool. This is not optional - it is architectural.
-4.2  Frontend stack - React
-LibraryRoleWhy thisThree.js r160+3D Orbit ViewWebGL 3D scene. Earth sphere with NASA texture. ECI coordinates map directly to Three.js cartesian space. One Points draw call handles all 10k debris. OrbitControls for interactive camera. TWEEN.js for smooth camera animation to selected satellite.React 18UI frameworkConcurrent rendering. useState/useEffect for snapshot polling. Component isolation per dashboard panel.deck.gl 8+GPU renderingWebGL-powered. ScatterplotLayer handles 100k+ points at 60fps. LineLayer for CDM threat overlay. The PS requires 10k+ debris at 60fps - deck.gl is the only React-native choice that handles this without WebWorkers.react-map-gl 7Mercator base mapWraps Mapbox GL. PS specifies "2D world map Mercator projection." Provides the geographic context for satellite ground tracks. Dark tile set.D3 v7Gantt timelineSVG-based time-scale axis. Custom burn block rendering. The Gantt is a bespoke visualization - D3 is the right tool for custom time-series layouts.three: ^0.160.03D Orbit ViewECI coordinates map directly to Three.js cartesian space. BufferGeometry Points for 10k debris in one draw call.@tweenjs/tween.js: ^23.0.0Camera animationSmooth camera position lerp when selecting a satellite in the 3D view.Vite 5Build tool20× faster than webpack. Hot module replacement in dev. Proxy config for /api/* routes. Outputs optimised static bundle for Docker.Pure SVGBullseye + Fuel HeatmapThese are custom geometric visualizations. No library needed. Direct SVG manipulation via React state is clean, lightweight, and fast.
-?WHY: Not Three.js or CesiumJS
-The PS explicitly requires a "2D world map Mercator projection" - it is a direct quote from the problem statement. Three.js (3D globe) and CesiumJS (3D globe) are wrong for this specification. They would impress a general audience but fail the judges who wrote the spec. deck.gl on a 2D Mercator base is the correct interpretation.
-4.3  Infrastructure
-Base imageubuntu:22.04 - HARD REQUIREMENT in PS. No substitution. Not python:3.10-slim. Not ubuntu:24.04.Python version3.10 - ubuntu:22.04 ships 3.10 via deadsnakes PPA. All code must be 3.10-compatible. No match/case. Use Union[X,Y] and Optional[X] from typing module.Port binding0.0.0.0:8000. The grader hits this from outside the container. Never 127.0.0.1 or localhost - grader cannot reach those.Frontend servingFastAPI mounts the React build as StaticFiles. app.mount("/", StaticFiles(directory="frontend/dist", html=True)). Mount AFTER all API routes.Numba cachecache=True in @njit decorator. Compiled bytecode cached in __pycache__. Eliminates recompilation on container restart if bind-mounted - not applicable in grader but good practice.
-
-PART V
-VThe Backend
-Every module, its contract, its inputs, its outputs, its forbidden states
-physics.py
-The orbital engine - the foundation everything else builds on
-Responsibility
-Advance any number of objects in orbital state space by an arbitrary time delta. Called thousands of times per simulation run. Must be correct and fast above all else.
-
-Constants - hardcode exactly these
-MU   = 398600.4418  # km³/s²  - Earth gravitational parameter
-RE   = 6378.137     # km      - Earth equatorial radius (WGS84)
-J2   = 1.08263e-3   # dimless - second zonal harmonic (WGS84)
-G0   = 9.80665e-3   # km/s²   - standard gravity in km/s units
-ISP  = 300.0        # s       - monopropellant specific impulse
-M_DRY= 500.0        # kg      - satellite dry mass
-M_FUEL_INIT = 50.0  # kg      - initial propellant per satellite
-CONSTELLATION_ALT_KM = 550.0  # km  - nominal operating altitude
-GRAVEYARD_ALT_KM     = 600.0  # km  - EOL target (IADC compliant)
-
-Public functions
-  ▸  rk4_batch(states: ndarray[N,6], dt: float) → ndarray[N,6]  - single RK4 step for N objects
-  ▸  propagate(states: ndarray[N,6], total_dt: float, step: float=30.0) → ndarray[N,6]  - multi-step propagation
-  ▸  tsiolkovsky_dm(m_current_kg: float, dv_km_s: float, isp: float=300.0) → float  - fuel consumed in kg
-
-Numba decoration - exact pattern
-@njit(nopython=True, parallel=True, cache=True, nogil=True)
-def _batch_derivatives(states: np.ndarray) -> np.ndarray:
-    N = states.shape[0]
-    derivs = np.zeros_like(states)
-    for i in prange(N):   # prange = parallel range, runs on multiple cores
-        x,y,z = states[i,0], states[i,1], states[i,2]
-        vx,vy,vz = states[i,3], states[i,4], states[i,5]
-        # ... compute J2 + two-body for object i independently
-    return derivs
-
-⚖LAW: Numba warmup
-In FastAPI lifespan startup: call rk4_batch(np.zeros((2,6)), 1.0) BEFORE accepting any requests. First call triggers JIT compilation (2-5 seconds). Grader hits /step immediately on container start. Warmup or fail.
-state.py
-The single source of truth for all runtime state
-SimState fields
-FieldTypePurposesat_statesndarray (M,6) float64ECI pos+vel of all M satellites (km, km/s)sat_idsList[str]Satellite IDs, same order as sat_states rowssat_fuel_kgndarray (M,) float64Current propellant mass per satellitesat_nominal_statesndarray (M,6) float64Ideal slot states - propagated each tick alongside satssat_last_burn_timendarray (M,) float64Sim seconds of last burn - for 600s cooldown enforcementsat_statusList[str]NOMINAL / EVADING / RECOVERING / EOLdeb_statesndarray (N,6) float64ECI pos+vel of all N debris objectsdeb_idsList[str]Debris IDs, same order as deb_states rowscurrent_time_sfloatSimulation epoch in seconds since initial_epochinitial_epochdatetimeISO timestamp from the first telemetry message receivedactive_cdmsList[CDM]Current conjunction warnings, sorted by PoC descendingmaneuver_queueList[ScheduledBurn]Upcoming burns, sorted by burn_time ascendingcollision_countintCumulative collisions detected (miss < 0.1 km during /step)maneuvers_executedintCumulative burns fired
-ScheduledBurn fields
-  ▸  satellite_id: str
-  ▸  burn_id: str  - unique, e.g. "EVASION_SAT04_001"
-  ▸  burn_time_s: float  - simulation seconds from epoch
-  ▸  dv_eci_km_s: ndarray (3,)  - ΔV vector in ECI frame
-  ▸  burn_type: str  - "EVASION" or "RECOVERY_1" or "RECOVERY_2"
-
-⚠CRITICAL: Thread safety
-FastAPI runs plain def routes in a thread pool. Concurrent requests can arrive simultaneously and both attempt to write sim_state. Without a lock, state is corrupted. Use: sim_lock = threading.Lock() globally. Acquire at the start of every route handler. Release at the end. No exceptions.
-conjunction.py
-Collision prediction - the speed-critical screening engine
-Phase 1 - KD-tree coarse filter
-  ▸  Build scipy.spatial.KDTree on deb_states[:, :3] - the N×3 position array of all debris.
-  ▸  Query all satellite positions simultaneously: tree.query_ball_point(sat_states[:, :3], r=200.0).
-  ▸  Returns a list of M lists, each containing the indices of debris within 200 km of that satellite.
-  ▸  Complexity: O(N log N) build + O(M·k·log N) query, k≈10. Eliminates 99.9% of pairs.
-
-Phase 2 - TCA search on candidates
-  ▸  For each (satellite idx, debris idx) candidate pair:
-  ▸    Coarse sweep: evaluate miss_distance at 300s intervals over [0, 86400s]. Find interval [t_lo, t_hi] containing minimum.
-  ▸    Fine search: scipy.optimize.minimize_scalar(func, bounds=(t_lo, t_hi), method="bounded", options={"xatol":1.0}).
-  ▸    Records: tca_offset_s, miss_distance_km, rel_velocity_km_s.
-  ▸    Discard if TCA miss > 5.0 km. Not a genuine threat.
-
-CDM threat levels
-  ▸  CRITICAL: miss_distance_km < 1.0  - triggers autonomous burn planning.
-  ▸  WARNING:  miss_distance_km 1.0-5.0  - logged, monitored, no burn.
-  ▸  Both sorted by PoC descending in the returned list.
-
-maneuver.py
-Optimal burn calculation - the intelligence core
-RTN frame construction
-R_hat = r / |r|                    # radial: points from Earth center through satellite
-N_hat = (r × v) / |r × v|           # normal: perpendicular to orbital plane
-T_hat = N_hat × R_hat               # transverse: in direction of velocity
-M_rtn2eci = column_stack([R, T, N]) # 3×3 rotation matrix
-dv_eci = M_rtn2eci @ dv_rtn         # convert burn vector to ECI frame
-
-Evasion burn - SLSQP optimisation
-# Constrained minimisation:
-# Minimize:    |dv_rtn|   (minimize total fuel cost)
-# Subject to:  miss_at_tca(dv_rtn) >= standoff_km  (safety constraint)
-#              |dv_rtn| <= 0.015                    (thrust limit: 15 m/s)
-#              fuel_after(dv_rtn) > eol_threshold
-
-result = scipy.optimize.minimize(
-    fun=lambda dv: np.linalg.norm(dv),
-    x0=np.array([0.0, 0.003, 0.0]),   # prograde bias initial guess
-    method="SLSQP",
-    constraints=[{"type":"ineq","fun": lambda dv: miss_at_tca(dv) - standoff},...],
-    options={"ftol":1e-8, "maxiter":200}
-)
-
-  ▸  If SLSQP fails (infeasible): fallback = np.array([0.0, 0.015, 0.0]) - maximum prograde. Log as DEGRADED_AVOIDANCE.
-  ▸  Fuel tiering: standoff = 0.500 km if fuel > 50%. 0.200 km if 10-50%. Skip if <10% (EOL protocol).
-
-Recovery burn - Hohmann phasing
-r_c = |sat_pos_post_evasion|  # current orbital radius (km)
-r_n = |nominal_slot_state[:3]|  # nominal slot radius (km)
-a_t = (r_c + r_n) / 2  # transfer orbit semi-major axis
-dv1 = |sqrt(MU*(2/r_c - 1/a_t)) - sqrt(MU/r_c)|  # burn 1 (prograde)
-dv2 = |sqrt(MU/r_n) - sqrt(MU*(2/r_n - 1/a_t))|  # burn 2 (prograde)
-T_transfer = pi * sqrt(a_t**3 / MU)  # half-period of transfer ellipse (seconds)
-
-planner.py
-The autonomous brain - conjunctions to scheduled burns
-run_autonomous_planner - exact decision sequence
-  1.  For each CDM where miss < 1.0 km (CRITICAL), sorted by PoC descending:
-  2.    a. Already handled? If satellite has EVASION burn for this deb_id in queue → skip.
-  3.    b. EOL satellite? If sat_status == EOL → skip (eol.py handles this).
-  4.    c. Too late? If tca_offset_s < 15.0 → log LATE_CONJUNCTION. Cannot act.
-  5.    d. Earliest burn = max(current_time_s + 10, sat_last_burn_time + 600).
-  6.    e. LOS window = predict_next_los_window(sat_state, earliest_burn). If None → log BLIND_UNRESOLVABLE.
-  7.    f. LOS arrives after TCA? → log BLIND_CONJUNCTION. Cannot uplink in time.
-  8.    g. Compute evasion burn via maneuver.compute_evasion_burn(). Schedule at los_window.
-  9.    h. Compute recovery sequence via maneuver.compute_recovery_burn(). Schedule both burns.
-  10.    i. Log CDM_ACTIONED. Set sat_status = EVADING.
-  11.  For CDMs 1.0-5.0 km (WARNING): log CDM_WARNING only. No burn.
-
-⚖LAW: Scheduling invariants
-(1) No burn may have burn_time < current_sim_time + 10. (2) No two burns on the same satellite may be within 600 seconds of each other. Both conditions are checked before any ScheduledBurn is added to the queue. These are grader test cases.
-logger.py
-The audit trail - every autonomous decision recorded
-The PS explicitly scores "accuracy of the system's maneuver logging capabilities." Real operational systems log every decision for post-hoc review. This module writes a JSON Lines file (one JSON object per line) to logs/acm_audit.jsonl.
-
-The 10 event types
-event_typeRequired fieldsCDM_DETECTEDsat_id, deb_id, tca_offset_s, miss_km, poc, threat_level, sim_timeCDM_ACTIONEDsat_id, deb_id, burn_id, burn_time, dv_rtn, dv_magnitude_m_s, fuel_cost_kg, los_stationCDM_WARNINGsat_id, deb_id, tca_offset_s, miss_km, poc, sim_timeBURN_EXECUTEDburn_id, sat_id, actual_dv_eci, mass_before_kg, mass_after_kg, sim_timeRECOVERY_SCHEDULEDsat_id, burn1_time, burn2_time, total_dv_m_s, transfer_time_sRECOVERY_COMPLETEsat_id, slot_error_km, time_outside_slot_sCOLLISION_DETECTEDsat_id, deb_id, miss_km, sim_timeEOL_TRIGGEREDsat_id, fuel_remaining_kg, graveyard_burn_dv, sim_timeBLIND_CONJUNCTIONsat_id, deb_id, tca_offset_s, next_los_time_sDEGRADED_AVOIDANCEsat_id, deb_id, fallback_dv_m_s, projected_miss_km
-Log record format - exact JSON structure
-{"timestamp_utc": "2026-03-12T08:00:00.000Z",
-  "sim_time_s": 3600.0,
-  "event_type": "CDM_ACTIONED",
-  "sat_id": "SAT-Alpha-04",
-  "deb_id": "DEB-99421",
-  "burn_id": "EVASION_SAT-Alpha-04_001",
-  "dv_magnitude_m_s": 8.4,
-  "fuel_cost_kg": 1.54,
-  "projected_miss_km": 0.52,
-  "los_station": "GS-001"}
-
-
-API routes - all five endpoints
-POST /api/telemetry
-Handler typeasync def - lightweight JSON parsing, not CPU-boundRequest{"timestamp": ISO, "objects": [{id, type, r:{x,y,z}, v:{x,y,z}}]}Response 200{"status":"ACK", "processed_count":N, "active_cdm_warnings":M}DEBRIS objectUpsert deb_states by ID. New → append row. Existing → overwrite.SATELLITE objectUpsert sat_states. New → append with M_FUEL_INIT fuel. Existing → overwrite state, preserve fuel/status.First callSet sim_state.initial_epoch from timestamp. Initialize nominal slots = current sat states.
-POST /api/simulate/step
-Handler typedef - NOT async def. CPU-bound. FastAPI threads it.Request{"step_seconds": int}Response 200{"status":"STEP_COMPLETE", "new_timestamp":ISO, "collisions_detected":int, "maneuvers_executed":int}Collision detectionDuring propagation sub-steps: if |sat_pos - deb_pos| < 0.100 km, increment collision_count.new_timestampinitial_epoch + timedelta(seconds=current_time_s), formatted as ISO 8601.
-POST /api/maneuver/schedule
-Request{"satelliteId":str, "maneuver_sequence":[{burn_id, burnTime:ISO, deltaV_vector:{x,y,z}}]}Response 202{"status":"SCHEDULED", "validation":{ground_station_los:bool, sufficient_fuel:bool, projected_mass_remaining_kg:float}}LOS validationCompute has_los(sat_pos_at_burnTime). Return result. Accept maneuver regardless of LOS result.Fuel validationSum Tsiolkovsky fuel cost for all burns in sequence. If remaining < 0: return 422 Unprocessable.
-GET /api/visualization/snapshot
-Response{"timestamp":ISO, "satellites":[{id,lat,lon,fuel_kg,status}], "debris_cloud":[[id,lat,lon,alt_km],...]}ECI→geodeticlat=arcsin(z/|r|), lon=arctan2(y,x), alt=|r|−RE. All in degrees / km.debris_cloud formatFlattened 4-tuple arrays [id, lat, lon, alt_km] - as specified in PS. Minimises JSON payload.Speed requirementMust respond in <50 ms. No heavy computation. Read from sim_state directly.
-GET /api/status
-Response{"system":"AETHER","sim_time_iso":ISO,"satellites_tracked":int,"debris_tracked":int,"active_cdm_warnings":int,"critical_conjunctions":int,"maneuvers_queued":int,"total_collisions":int,"fleet_fuel_remaining_kg":float,"recent_events":[last 10 log entries]}PurposeOperational health check. Fed by the in-memory logger buffer. Used by frontend CDM overlay. Standard in every deployed system.
-
-PART VI
-VIThe Physics and Mathematics
-Every equation, every derivation, every physical constant explained
-6.1  Coordinate system - Earth-Centered Inertial (ECI)
-All positions and velocities in this system are expressed in the J2000 ECI frame. The origin is Earth's center of mass. The x-axis points toward the vernal equinox at the J2000 epoch. The z-axis points toward the north celestial pole. The frame is non-rotating relative to the stars - no fictitious forces (Coriolis, centrifugal) appear in the equations of motion. This is the correct frame for orbital propagation.
-
-State vector for every object at time t:
-
-S(t) = [x, y, z, vx, vy, vz]ᵀ    positions in km,  velocities in km/s
-
-6.2  Equations of motion with J2 perturbation
-The two-body equation (Keplerian) gives the gravitational acceleration for a point mass orbiting a spherical Earth:
-
-d²r/dt² = −(μ/|r|³) · r
-
-But Earth is not a sphere - it bulges at the equator. The J2 term (second zonal harmonic of Earth's gravitational potential) accounts for this oblateness. It produces nodal regression and apsidal precession - effects that accumulate and matter for conjunction assessment over 24 hours.
-
-The J2 acceleration vector, derived from the gravitational potential expansion:
-
-factor = (3/2) · J2 · μ · Rₑ² / |r|⁵
-
-a_J2_x = factor · x · (5z²/|r|² − 1)
-a_J2_y = factor · y · (5z²/|r|² − 1)
-a_J2_z = factor · z · (5z²/|r|² − 3)
-
-Total acceleration:
-a_total = −(μ/|r|³) · r  +  a_J2
-
-Constants:  μ = 398600.4418 km³/s²  ·  Rₑ = 6378.137 km  ·  J2 = 1.08263 × 10⁻³
-
-6.3  Runge-Kutta 4th Order integration
-We propagate the state vector forward in time by numerically integrating the equations of motion. The classic RK4 algorithm:
-
-k1 = f(s)
-k2 = f(s + 0.5·dt·k1)
-k3 = f(s + 0.5·dt·k2)
-k4 = f(s + dt·k3)
-s_new = s + (dt/6) · (k1 + 2·k2 + 2·k3 + k4)
-
-where f(s) = derivatives(s) = [vx, vy, vz, ax, ay, az]ᵀ.
-
-Sub-step: 30 seconds. For a 550 km circular orbit, the period is ≈ 5760 s - about 192 steps per orbit. RK4 at this step size has global truncation error O(h⁴) ≈ negligible over 24 hours for J2-only perturbations. Euler (O(h)) would accumulate unacceptable error.
-
-6.4  Tsiolkovsky rocket equation - propellant depletion
-Every burn consumes propellant. Mass is depleted following the Tsiolkovsky equation. After each burn:
-
-Δm = m_current · (1 − e^(−|ΔV| / (Isp · g₀)))
-
-where:
-|ΔV|  = magnitude of velocity change in km/s
-Isp  = 300.0 s  (monopropellant thruster specific impulse)
-g₀   = 0.00980665 km/s²  (standard gravity, converted to km/s units)
-m_current  = current wet mass (dry + remaining fuel) at time of burn
-
-As fuel depletes, m_current decreases, making subsequent burns slightly more fuel-efficient (smaller mass accelerated by the same ΔV). This is tracked per-satellite throughout the simulation.
-
-6.5  RTN coordinate frame
-Maneuver planning is done in the Radial-Transverse-Normal frame local to the satellite:
-
-R (Radial)    : R̂ = r / |r|               - points from Earth center through satellite
-T (Transverse) : T̂ = N̂ × R̂               - perpendicular to R̂, in direction of velocity
-N (Normal)     : N̂ = (r × v) / |r × v|    - perpendicular to orbital plane
-
-The rotation matrix from RTN to ECI:
-M_rtn2eci = column_stack([R̂, T̂, N̂])   # 3×3 orthogonal matrix
-Δv_eci    = M_rtn2eci @ Δv_rtn
-
-Physical intuition: T-direction burns change the orbital period (phase maneuvers - cheapest). R-direction burns change eccentricity. N-direction burns change inclination (most expensive - avoid unless forced).
-
-6.6  Probability of Collision - Akella-Alfriend model
-Raw miss distance alone is insufficient as a risk metric. A 90 m miss at relative velocity 0.5 km/s is not a collision threat. A 90 m miss at 14 km/s is catastrophic. The Akella-Alfriend (2000) short-encounter model computes the probability of collision given a miss distance, accounting for position uncertainty:
-
-r_hb   = (sat_size_m + deb_size_m) / 1000.0  # combined hard-body radius in km
-sigma  = max(miss_km × 0.1,  0.010)          # 10% uncertainty floor
-PoC    = (r_hb² / 2σ²) · exp(−miss_km² / 2σ²)
-
-This is the metric used by real CDMs (Conjunction Data Messages) issued by the US Space Surveillance Network. Sorting threats by PoC rather than miss distance is the operationally correct approach. This will be recognized by ISRO judges.
-
-6.7  Hohmann transfer - recovery maneuver
-After an evasion burn, the satellite is displaced from its nominal slot. A two-burn Hohmann phasing transfer returns it. The transfer connects two approximately circular orbits at different radii:
-
-r_c = |sat_pos_post_evasion|         # current orbital radius
-r_n = |nominal_slot_pos|             # target orbital radius
-a_t = (r_c + r_n) / 2               # semi-major axis of transfer ellipse
-
-v_circ_c = sqrt(μ/r_c)              # circular velocity at r_c
-v_circ_n = sqrt(μ/r_n)              # circular velocity at r_n
-v_peri   = sqrt(μ·(2/r_c − 1/a_t)) # transfer orbit velocity at perigee
-v_apo    = sqrt(μ·(2/r_n − 1/a_t)) # transfer orbit velocity at apogee
-
-ΔV₁ = |v_peri − v_circ_c|           # prograde - raises apogee to r_n
-ΔV₂ = |v_circ_n − v_apo|           # prograde - circularizes at r_n
-T_transfer = π · sqrt(a_t³/μ)       # half-period: travel time from r_c to r_n
-
-Both burns are prograde (T-direction in RTN) and converted to ECI via M_rtn2eci before submission. Burn 1 fires after the 600s cooldown from the evasion burn plus the next LOS window. Burn 2 fires after T_transfer + 600s cooldown + next LOS window.
-
-6.8  Ground station line-of-sight - elevation angle
-A burn command can only be uplinked when the satellite has geometric line-of-sight to a ground station. Elevation angle from station to satellite:
-
-# Convert ground station geodetic coordinates to ECEF:
-gs_ecef = (RE + alt_km) · [cos(lat)·cos(lon), cos(lat)·sin(lon), sin(lat)]
-
-# Elevation angle (ECI ≈ ECEF approximation valid for LOS check):
-range_vec = sat_pos_eci − gs_ecef
-elev_deg  = degrees(arcsin(dot(range_vec, gs_ecef/|gs_ecef|) / |range_vec|))
-
-LOS exists when elev_deg ≥ min_elevation_angle for that station. The six stations and their elevation masks are given in the PS (see Part V, ground_station.py section).
-
-
-PART VII
-VIIThe Frontend
-The Orbital Insight dashboard - panel by panel
-7.1  Design intent
-The PS says: "a 2D Operational Dashboard analogous to the software utilized by Flight Dynamics Officers at mission control." The mental model is not a data visualization project. It is a tool an FDO uses during a live conjunction crisis to answer four questions immediately: (1) Which satellite is threatened? (2) What is threatening it? (3) When does the burn fire? (4) How much fuel is left?
-
-Visual direction: mission control - dark navy background, high-contrast status colors (green=safe, amber=attention, red=critical), compact information density. Every pixel earns its space.
-
-7.2  Layout
-App.jsx CSS Grid:
-  grid-template-columns: 65% 35%
-  grid-template-rows: 55vh 45vh
-  background: #0A1628
-  gap: 1px   // single-pixel border between panels
-
-Top-left   (65% × 55vh): GroundTrack.jsx
-Top-right  (35% × 55vh): BullseyePlot.jsx
-Bottom-left(65% × 45vh): GanttTimeline.jsx
-Bottom-right(35% × 45vh): FuelHeatmap.jsx
-
-7.3  Ground Track (GroundTrack.jsx)
-Layers - bottom to top rendering order
-  ▸  react-map-gl base: Mapbox dark-v10 or MapLibre GL with dark open tiles. Mercator projection. Interactive pan/zoom.
-  ▸  Terminator line: PathLayer. Compute subsolar point at current sim epoch. Walk the terminator circle (where solar elevation = 0) as a series of lat/lon points. Color: rgba(0, 0, 40, 0.5).
-  ▸  Ground stations: IconLayer. 6 triangle icons at GS lat/lon positions. Color: cyan.
-  ▸  Debris cloud: ScatterplotLayer. Data from snapshot.debris_cloud tuples [id, lat, lon, alt_km]. getPosition = d => [d[2], d[1]]. getRadius = 5000 m. getFillColor = [220, 60, 40, 90]. NOT pickable.
-  ▸  Satellite trails: PathLayer. Circular buffer of last 90 min positions per satellite. getPath = d => d.positions. getColor = [100, 200, 140, 160]. getWidth = 1.5.
-  ▸  CDM threat overlay (v2.0): LineLayer. For each CDM in active_cdms from /api/status: draw line from sat position to current debris position. getColor = d => d.threat_level === "CRITICAL" ? [220,38,38,220] : [217,119,6,180]. getWidth = d => d.threat_level === "CRITICAL" ? 3 : 1.
-  ▸  Satellites: ScatterplotLayer. getPosition = d => [d.lon, d.lat]. getRadius = 60000. getFillColor = statusColor(status): NOMINAL=[34,197,94], EVADING=[217,119,6], RECOVERING=[59,130,246], EOL=[107,114,128]. pickable=true. onClick = selectSatellite.
-
-Interactions
-  ▸  Click satellite → set selected satellite for BullseyePlot.
-  ▸  Hover satellite → tooltip: ID, status, fuel %, active CDMs.
-  ▸  Scroll wheel → zoom.
-
-7.4  Bullseye Plot (BullseyePlot.jsx)
-Pure SVG. No library. Shows all conjunction threats around the selected satellite from an FDO perspective.
-
-  ▸  Coordinate system: polar. Center = selected satellite. Radial axis = TCA minutes (0 at center = imminent). Angular axis = approach_azimuth_deg from CDM.
-  ▸  Rings at TCA = 60 min, 360 min, 720 min, 1440 min. Labeled.
-  ▸  Debris dots: radius = 8px. Color: green (miss > 5km), yellow (1-5km), red (<1km). Size = proportional to 1/miss_distance_km.
-  ▸  Header area: selected satellite ID, fuel %, status badge, most dangerous CDM summary.
-  ▸  Empty state: "No satellite selected. Click on ground track."
-
-7.5  Fuel Heatmap (FuelHeatmap.jsx)
-CSS Grid of 50 cells. Sorted ascending by fuel_pct (most critical top-left). Fleet summary header.
-
-  ▸  Header: total fleet fuel remaining (kg), total ΔV consumed (m/s), satellites at risk count.
-  ▸  Each cell (50 total): satellite ID (12px), horizontal fuel bar (css gradient: green→amber→red), fuel_kg number.
-  ▸  Fuel bar color thresholds: > 50% = green, 10-50% = amber, < 10% = red.
-  ▸  Animation: cells with fuel < 10% → pulsing red border (CSS @keyframes).
-  ▸  EOL satellite: gray background, "EOL" badge, no fuel bar.
-
-7.6  Gantt Timeline (GanttTimeline.jsx)
-D3 horizontal timeline. Shows all scheduled burns with their cooldown periods. X-axis is simulation time, scrollable ±6 hours from now.
-
-  ▸  One row per satellite with scheduled burns. Rows ordered by next burn time.
-  ▸  EVASION blocks: #2563EB (blue).
-  ▸  RECOVERY blocks: #0D9488 (teal).
-  ▸  Cooldown blocks: #374151 (steel gray), 600s wide.
-  ▸  Blackout zones: red overlay where satellite has no LOS to any station.
-  ▸  Current sim time: vertical red line that advances as /step is called.
-  ▸  Tooltip on hover: burn_id, scheduled_time, ΔV magnitude (m/s), fuel_cost (kg).
-
-7.7  3D Orbit View (OrbitView3D.jsx) - the beyond-spec panel
-The PS requires a 2D Mercator dashboard. The 3D Orbit View is not a replacement - it is a toggleable modal that opens on demand, built on top of the required dashboard. It shows the actual orbital geometry: where the satellite is in space, the approach trajectory of the threatening debris, and the burn vector.
-
-Why this matters to judges: when a judge clicks "3D View" during the demo and sees the conjunction geometry in three dimensions - the debris approaching from above, the burn vector deflecting the satellite's path - they understand viscerally why the system works. No amount of numbers communicates this as quickly.
-
-Trigger
-A "3D View" button in the top-right corner of the Ground Track panel. Clicking it opens a full-screen modal overlay containing the Three.js canvas. A close button (×) returns to the 2D dashboard. The 2D dashboard continues updating in the background.
-
-Coordinate system - the key insight
-ECI coordinates from the simulation map directly to Three.js cartesian space with no conversion. The Earth sphere in the scene has radius RE_SCALE = 1.0 Three.js units, which represents 6378.137 km. Every satellite and debris position from /snapshot is divided by 6378.137 to get Three.js units. The ECI x,y,z axes become the Three.js x,y,z axes directly.
-
-// ECI → Three.js coordinates (no rotation, direct mapping)
-const SCALE = 1.0 / 6378.137  // 1 Three.js unit = 1 Earth radius
-const toThree = (eci) => new THREE.Vector3(eci.x * SCALE, eci.z * SCALE, -eci.y * SCALE)
-// Note: Three.js uses Y-up; ECI uses Z-up. Swap y↔z, negate new z.
-
-Scene construction
-  ▸  Earth sphere: SphereGeometry(1.0, 64, 64). MeshPhongMaterial with day texture (NASA Blue Marble free, 2048×1024 jpg). Ambient light + directional light (sun direction from sim epoch). Slow auto-rotation off when a satellite is selected.
-  ▸  Atmosphere glow: second SphereGeometry(1.02, 64, 64) with MeshPhongMaterial(transparent:true, opacity:0.08, color:0x4488ff). Visual depth only.
-  ▸  Debris cloud: THREE.Points with BufferGeometry. positions Float32Array of all debris in Three.js units. PointsMaterial(size:0.002, color:0xcc3322, opacity:0.5, transparent:true). Updated from /snapshot every 500ms.
-  ▸  Constellation satellites: 50 THREE.Mesh(SphereGeometry(0.008), MeshBasicMaterial). Color by status: NOMINAL=green, EVADING=amber, RECOVERING=blue, EOL=gray. Updated every 100ms.
-  ▸  Selected satellite orbit trail: THREE.Line with BufferGeometry. Last 90 minutes of positions as a line in space. Color: rgba(100,200,140,0.8).
-  ▸  CDM threat line (selected satellite): THREE.Line from selected satellite position to threatening debris position. Color: red for CRITICAL, amber for WARNING. Dashed LineDashedMaterial.
-  ▸  Burn vector arrow: when evasion burn is scheduled, draw an ArrowHelper from satellite position in the direction of ΔV_ECI, scaled for visibility. Color: yellow.
-  ▸  Ground stations: 6 small cone geometries on the Earth surface, pointing radially outward. Color: cyan. Height = 0.03 Three.js units.
-
-Camera and controls
-  ▸  THREE.PerspectiveCamera(60, aspect, 0.1, 100). Initial position: (0, 0, 3.5) - far enough to see full Earth.
-  ▸  THREE.OrbitControls - full rotate, zoom, pan. enableDamping=true for smooth feel.
-  ▸  When a satellite is selected from the ground track: animate camera to focus on that satellite. Use TWEEN.js or lerp on camera.position and controls.target.
-  ▸  Auto-follow mode: camera tracks selected satellite as it moves.
-
-Performance - handling 10k debris in 3D
-All 10,000 debris objects are rendered as a single THREE.Points object - one draw call. BufferGeometry with positions as a Float32Array. This is the same principle as deck.gl ScatterplotLayer but in Three.js. Update: replace the positions array contents in-place each frame, call geometry.attributes.position.needsUpdate = true. Never create/destroy objects per frame.
-
-What to show in the demo
-  ▸  Open the 3D view. Earth rotating slowly in dark space. Green satellite dots orbiting at 550 km.
-  ▸  Select the threatened satellite (SAT-Alpha-04). Camera swoops to focus on it.
-  ▸  The red dashed line to the approaching debris is visible - the conjunction geometry in three dimensions.
-  ▸  The yellow burn vector arrow shows the planned ΔV direction. The judge sees why a prograde burn increases separation.
-  ▸  After the burn fires: the satellite's trail visibly diverges from its original path. The threat line disappears.
-  ▸  Close modal. Return to 2D dashboard.
-
-npm additions required
-three: ^0.160.0  - Three.js (r160+, has OrbitControls as ESM import)
-@tweenjs/tween.js: ^23.0.0  - smooth camera animation
-
-Import OrbitControls as: import { OrbitControls } from "three/addons/controls/OrbitControls.js" - this is the correct path for Three.js r128+. Do not use the old examples/ path.
-
-7.8  API client (api.js)
-// Snapshot at 10 Hz - positions for ground track and fuel heatmap
-setInterval(() =>
-  fetch("/api/visualization/snapshot")
-    .then(r => r.json())
-    .then(snap => setSnapshot(snap))
-, 100)
-
-// Status at 2 Hz - CDMs for threat overlay, Gantt, and 3D view
-setInterval(() =>
-  fetch("/api/status")
-    .then(r => r.json())
-    .then(status => setStatus(status))
-, 500)
-
-
-PART VIII
-VIIIThe Delivery
-Build sequence · Docker · Demo scenario · Technical report · Video
-8.1  Build sequence - 18 components in order
-Build in this sequence. Each component has a concrete completion test. Test before moving on.
-
-#ComponentCompletion testDepends on1physics.pyPropagate 550km circular orbit 90 min. Final position within 1km of Keplerian prediction. Tsiolkovsky: dm for 1 m/s on 550 kg ≈ 0.187 kg.-2state.pyInstantiate SimState. Add 3 fake sats + 10 debris. Verify shapes. Lock acquired correctly.physics.py3FastAPI skeleton (all 5 endpoints stubbed)docker run -p 8000:8000. All 5 routes return valid JSON. Port accessible from outside container.state.py4routes_telemetry.pyPOST 3 sats + 100 debris. sat_states.shape=(3,6). deb_states.shape=(100,6).state.py5routes_simulate.pyPOST step=3600. States propagated. new_timestamp = initial+1h. Numba warmup in startup logs.physics.py + telemetry6conjunction.py1 sat + 1 debris 50km apart converging → CDM returned with correct TCA and miss. Diverging → no CDM.physics.py7ground_station.pySat directly over IIT Delhi at 400km → elevation ≈ 90°. Sat at antipode → elevation < 0°.-8maneuver.pyConjunction at 80m miss → evasion ΔV < 15 m/s, post-burn miss > 500m. Recovery → 2 prograde burns.physics.py + GS9logger.pyFire fake CDM_ACTIONED event. logs/acm_audit.jsonl contains correct JSON record.state.py10planner.pyInject CRITICAL CDM. run_autonomous_planner() fills maneuver_queue. Timing invariants verified.conjunction + maneuver + logger11eol.pySet sat fuel to 2.0 kg. eol.check() moves it to deb_states. Graveyard burn scheduled. EOL_TRIGGERED logged.maneuver + logger12Full backend integration24h sim, 50 sats, 5000 debris. Zero collisions. /step responds <500ms. Audit log has all event types.All backend13Frontend scaffold + api.jsnpm run dev. /snapshot polled 10Hz. /status polled 2Hz. No CORS errors.Backend running14GroundTrack.jsxSats + debris at 60fps. CDM threat lines appear for CRITICAL CDMs. Disappear when resolved.api.js15BullseyePlot.jsxClick threatened sat → bullseye shows debris at correct angles and colors.api.js + CDMs16FuelHeatmap.jsx50 cells, sorted, updating. EOL cell grayed.api.js17GanttTimeline.jsxBurn blocks appear. Cooldowns shown. Current time line advances.api.js + burns17OrbitView3D.jsxOpen 3D view modal. Earth globe renders. Select threatened satellite - camera animates to it. Red threat line visible. Yellow burn vector arrow appears when burn is scheduled.api.js + Three.js18Docker final builddocker build && docker run -p 8000:8000. Frontend at /. All APIs accessible. Numba warmup fires.Everything
-8.2  Docker - exact specification
-FROM ubuntu:22.04
-ENV DEBIAN_FRONTEND=noninteractive
-RUN apt-get update && apt-get install -y \
-    software-properties-common curl \
-    && add-apt-repository ppa:deadsnakes/ppa \
-    && apt-get update \
-    && apt-get install -y python3.10 python3.10-dev python3-pip nodejs npm \
-    && rm -rf /var/lib/apt/lists/*
-WORKDIR /app
-COPY requirements.txt .
-RUN pip3 install --no-cache-dir -r requirements.txt
-COPY frontend/package*.json ./frontend/
-RUN cd frontend && npm ci
-COPY frontend/ ./frontend/
-RUN cd frontend && npm run build
-COPY . .
-EXPOSE 8000
-CMD ["python3", "-m", "uvicorn", "acm.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
-
-⚠CRITICAL: Non-negotiable Docker rules
-(1) FROM ubuntu:22.04 - not python:3.10-slim, not ubuntu:24.04. (2) CMD must use --host 0.0.0.0 - never 127.0.0.1 or localhost. (3) EXPOSE 8000. Failure on any of these = automatic grader disqualification.
-requirements.txt
-fastapi==0.115.0
-uvicorn[standard]==0.30.0
-pydantic==2.7.0
-numpy==1.26.4
-scipy==1.13.0
-numba==0.60.0
-scikit-learn==1.5.0
-
-8.3  Demo scenario - the scripted 5-minute story
-The final round is a live presentation to ISRO scientists. These are people who handle conjunctions manually today. The demo must show, in real time, that AETHER does in seconds what takes their team hours.
-
-Pre-seed the simulation with DEMO_MODE=True in constellation_init.py. This uses a fixed random seed that guarantees the following event sequence:
-
-  ▸  T+0 min: System starts. 50 satellites nominal at 550 km. 5000 debris in catalog.
-  ▸  T+2 min: 3 WARNING conjunctions detected. Amber threat lines appear on ground track.
-  ▸  T+4 min: One WARNING escalates to CRITICAL. Planner fires SLSQP (50ms). Burn block appears in Gantt.
-  ▸  T+8 min: Evasion burn executes. Threat line disappears (miss now 520m). SAT-Alpha-04 turns amber.
-  ▸  T+14 min: Recovery Burn 1 fires. Hohmann transfer begins.
-  ▸  T+20 min: Recovery Burn 2 fires. SAT-Alpha-04 returns to NOMINAL (green). Slot error < 5 km.
-  ▸  T+22 min: Second CRITICAL conjunction. System handles it identically - demonstrating fleet-wide autonomy.
-  ▸  T+28 min: One satellite reaches EOL threshold. Graveyard burn fires. Fuel heatmap cell turns gray with EOL badge.
-  ▸  T+30 min: /api/status → zero collisions, 14 burns executed, 98.4% fleet uptime, 10.8% ΔV budget used.
-
-5-minute video script
-TimeShowSay0:00Title cardName + competition. "AETHER - an Autonomous Constellation Manager. Zero collisions. Zero human intervention."0:30Full dashboardThe four panels. "50 satellites nominal at 550 km. 5000 tracked debris objects. Updating in real time at 60 frames per second."1:00Conjunction eventCDM escalates. Threat line appears connecting SAT-Alpha-04 to debris. "The system detected this 18 minutes before closest approach."1:45Planner firesGantt burn block appears. "SLSQP constrained minimisation found the minimum-ΔV solution in 50 milliseconds. A human operator takes 2-4 hours."2:30Execution + recoveryBurn fires. Threat line disappears. Satellite turns amber, then recovers to green. "Satellite recovered to nominal slot in 12 minutes. Fuel consumed: 1.54 kg of 50 kg total."3:153D Orbit ViewClick "3D View" on ground track. Globe opens full-screen. Camera flies to SAT-Alpha-04. "This is the conjunction in three dimensions. The debris approaches from above. The yellow arrow is the planned burn vector. This is why a prograde burn creates separation."3:45EOL demoClose 3D view. Fuel heatmap. One cell goes gray. "When fuel drops to 5%, the system schedules a graveyard maneuver to 600 km - IADC 25-year deorbit compliant."3:45Audit log + status/api/status response. "Every autonomous decision is logged. Zero collisions. 14 burns executed. 98.4% fleet uptime."4:30CloseDashboard. "ISRO's NETRA handles this manually. AETHER is the software layer that makes it autonomous."
-8.4  Technical report - LaTeX structure
-SectionMust contain - what it must prove1. IntroductionCOLA scalability problem. NETRA / ESA CREAM context. Approach in one paragraph.2. ArchitectureModule dependency diagram. API endpoint table. Why single-process in-memory.3. PropagationFull J2 derivation. RK4 vs Euler: O(h⁴) vs O(h) truncation. Sub-step stability analysis for 550km LEO.4. ConjunctionComplexity proof: naïve O(MN) = 500k pairs vs KD-tree O(N log N) + O(k log N) = 500 propagations → 1000× speedup. Golden-section TCA. Akella-Alfriend (2000) PoC - cite the paper.5. ManeuverSLSQP formulation in LaTeX math. Hohmann recovery derivation. ΔV savings table: greedy vs SLSQP for 10 conjunction scenarios (actual numbers from simulation).6. Results/step latency (ms), total ΔV consumed, ΔV savings vs greedy (%), fleet uptime (%), collisions: 0, false positive rate. All from the 24h simulation run.7. AuditThe 10-event log schema. Sample records. Why structured logging enables operational acceptance.8. ConclusionAchieved. Limitations: J2-only, simplified PoC. Future work: atmospheric drag, full covariance PoC.
-
-PART IX
-IXThe Global Audit
-What was missing - what was fixed - why it matters
-9.1  Audit methodology
-The audit asked one question from the perspective of the judging panel: if an ISRO Flight Dynamics Officer looked at this system, what would they find missing that a real operational system has? This is different from asking what the automated grader checks. Seven gaps were found across three audits. All seven are now closed in this v3.0 document.
-
-9.2  The seven gaps - found and closed
-#Gap foundSeverityWhere it lives in v3.0What was added1No maneuver audit logCRITICALPart V - logger.pyComplete 10-event schema. JSON Lines format. Fed to /api/status. The PS explicitly scores logging accuracy.2No demo scenario or presentation narrativeCRITICALPart VIII §8.3Full 30-min scripted demo with pre-seeded conjunction events. 5-min video script. Opening and closing lines written.3Ground track had no conjunction visualSIGNIFICANTPart VII §7.3CDM threat overlay layer: deck.gl LineLayer connecting threatened satellite to debris. Red=CRITICAL, amber=WARNING.4Report had no performance numbersSIGNIFICANTPart VIII §8.4Section 6 of report now specifies exact metrics: latency, ΔV savings %, uptime %, false positive rate.5No /api/status health endpointMODERATEPart V - routes_status.pyGET /api/status returns full system health including recent audit log entries. Feeds frontend CDM overlay.6No constellation altitude definedMODERATEPart V - physics.py constantsCONSTELLATION_ALT_KM=550, GRAVEYARD_ALT_KM=600 (IADC 25-year deorbit compliant). Cited explicitly.7Demo video had no contentMODERATEPart VIII §8.3Minute-by-minute 8-row video script. Specific lines written for each segment.8No 3D orbital geometry viewENHANCEMENTPart VII §7.7 - OrbitView3D.jsxAdded as a fifth toggleable panel (full-screen modal). Three.js globe. ECI coordinates map directly. 10k debris as single Points draw call. Camera flies to selected satellite. CDM threat line and burn vector arrow visible in 3D space. Opens from a button on the ground track. Does not replace the required 2D Mercator dashboard.
-◆INSIGHT: What the audit process reveals
-The automated grader scores correctness. The ISRO judges score operational thinking. A technically perfect system that has no logging, no demo story, and no visual indication of threats during a conjunction event will lose to a slightly less correct system that demonstrates it understands what real space operations look like.
-
-PART X
-XThe Verification
-Every item that must be true before submission
-Run through every item below before submitting the GitHub link. These are organized in three tiers: disqualification risks, automated score, and manual score.
-
-Tier 1 - HARD REQUIREMENTS (any failure = disqualification)
-
-
-  ☐  Dockerfile exists at repository root (not in a subdirectory)
-  ☐  FROM ubuntu:22.04 - exactly this string, no substitution
-  ☐  EXPOSE 8000 in Dockerfile
-  ☐  CMD uses --host 0.0.0.0 --port 8000
-  ☐  docker build . completes without errors
-  ☐  docker run -p 8000:8000 starts and stays running
-  ☐  GitHub repository is set to public
-  ☐  POST /api/telemetry returns 200 with {"status":"ACK"}
-  ☐  POST /api/simulate/step returns 200 with {"status":"STEP_COMPLETE"}
-  ☐  POST /api/maneuver/schedule returns 202 with {"status":"SCHEDULED"}
-  ☐  GET /api/visualization/snapshot returns 200 with satellites and debris_cloud
-  ☐  GET /api/status returns 200 with system health fields
-
-Tier 2 - AUTOMATED SCORE (60% of total)
-
-
-  ☐  Zero collisions in 24h simulation run (50 satellites + 10,000 debris)
-  ☐  No burn has burn_time < current_sim_time + 10 seconds
-  ☐  No two burns on same satellite within 600 seconds of each other
-  ☐  Every individual burn ΔV magnitude ≤ 0.015 km/s (15 m/s)
-  ☐  Satellite fuel never goes negative
-  ☐  Satellite at ≤ 2.5 kg fuel triggers graveyard maneuver to ≥ 600 km
-  ☐  /api/simulate/step responds in < 500 ms for 50 sats + 10,000 debris
-  ☐  SLSQP fallback fires for infeasible conjunctions - never skips the burn
-  ☐  Nominal slot propagated alongside satellites - recovery burns target the correct slot
-  ☐  After recovery burns, satellite re-enters 10 km slot within one orbit
-
-Tier 3 - MANUAL SCORE (40% of total)
-
-
-  ☐  Ground track renders all satellites + debris cloud at 60 fps
-  ☐  CDM threat lines appear on ground track for CRITICAL conjunctions
-  ☐  CDM threat lines disappear when conjunction is resolved
-  ☐  Satellite status colors correct: green=NOMINAL, amber=EVADING, blue=RECOVERING, gray=EOL
-  ☐  90-minute satellite trail history visible
-  ☐  Terminator line (day/night boundary) visible
-  ☐  Bullseye plot updates on satellite click - correct approach angles and distances
-  ☐  Bullseye color coding correct: green/yellow/red by miss distance
-  ☐  Fuel heatmap shows all 50 satellites, sorted by fuel level ascending
-  ☐  EOL satellite cells appear gray with EOL badge
-  ☐  Gantt timeline shows EVASION and RECOVERY burn blocks
-  ☐  600-second cooldown periods shown as gray blocks in Gantt
-  ☐  Blackout zones highlighted in red on Gantt
-  ☐  /api/status returns recent_events with last 10 audit log entries
-  ☐  logs/acm_audit.jsonl exists and contains all 10 event types after 24h run
-  ☐  LaTeX report PDF renders correctly (15+ pages)
-  ☐  Report Section 4 contains complexity derivation: naïve O(MN) vs KD-tree O(N log N)
-  ☐  Report Section 5 contains SLSQP formulation in LaTeX math mode
-  ☐  Report Section 5 contains ΔV savings table: greedy vs SLSQP with actual numbers
-  ☐  Report Section 6 contains /step latency, uptime %, collision count from 24h run
-  ☐  Report cites Akella & Alfriend (2000) for PoC formulation
-  ☐  Demo video shows 3D Orbit View opening and closing without error
-  ☐  Demo video shows camera flying to selected satellite in 3D view
-  ☐  Demo video shows CDM threat line and burn vector arrow in 3D view
-  ☐  Demo video is ≤ 5 minutes
-  ☐  Demo video shows all four dashboard panels operating simultaneously
-  ☐  Demo video shows a complete conjunction event: detection → burn → recovery → nominal
-  ☐  Demo video shows EOL graveyard maneuver triggering
-  ☐  Demo video ends with /api/status showing zero collisions
-
-
-
-This is the Bhagavad Gita for AETHER. Ten parts. Every layer covered. The problem that created the need. The idea that answers it. The design that structures it. The stack that enables it. The backend that runs it. The physics that governs it. The frontend that shows it. The delivery that submits it. The audit that hardened it. The verification that proves it.
-
-PROJECT AETHER - Autonomous Constellation ManagerBUILD SPECIFICATION  v3.0  ·  The Bhagavad Gita Edition
-
-
-National Space Hackathon 2026  ·  IIT Delhi  ·  ISRO	Confidential Build Document
-

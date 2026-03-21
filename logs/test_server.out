@@ -1,0 +1,6 @@
+[AETHER] Warming up Numba JIT compiler...
+[AETHER] Numba JIT warmup complete.
+[AETHER] Loading ground stations...
+[AETHER] Ground stations loaded.
+[AETHER] System ready. Accepting requests on port 8000.
+[AETHER] Shutdown.

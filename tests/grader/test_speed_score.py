@@ -1,5 +1,5 @@
-"""
-Speed Score tests — 15% of total grader score.
+﻿"""
+Speed Score tests â€” 15% of total grader score.
 Latency tests for all major endpoints under realistic load.
 """
 import pytest
@@ -94,3 +94,4 @@ class TestSpeedScore:
                            {"step_seconds": 60})
         assert r.status_code == 200, f"Measured step failed: {r.status_code}"
         assert_response_time(ms, 30_000, "50sats+10000deb /simulate/step [GRADER SCALE]")
+

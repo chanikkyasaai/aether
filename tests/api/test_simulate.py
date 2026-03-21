@@ -1,5 +1,5 @@
-"""
-POST /api/simulate/step — Contract and performance tests.
+﻿"""
+POST /api/simulate/step â€” Contract and performance tests.
 The grader evaluates /step speed as 15% of total score.
 """
 import time
@@ -31,7 +31,7 @@ class TestSimulateStep:
             assert field in body, (
                 f"Required field '{field}' missing from /simulate/step response. "
                 f"Response was: {body}. "
-                f"FIX: Include all four fields in StepResponse schema."
+                f"Requirement: Include all four fields in StepResponse schema."
             )
 
     def test_step_advances_time(self, session, reset_state):
@@ -45,7 +45,7 @@ class TestSimulateStep:
         # Expect epoch + 60s = 08:00:01 ... 08:01:00
         assert "2026-03-12T08:01:00" in ts or "08:01:00" in ts, (
             f"Expected timestamp to reflect +60s from 08:00:00, got '{ts}'. "
-            "FIX: Advance sim_state.current_time_s by step_seconds each step."
+            "Requirement: Advance sim_state.current_time_s by step_seconds each step."
         )
 
     def test_step_without_satellites(self, session, reset_state):
@@ -53,7 +53,7 @@ class TestSimulateStep:
         r = post_step(session, 60)
         assert r.status_code == 200, (
             f"Expected 200 for empty step, got {r.status_code}: {r.text}. "
-            "FIX: /simulate/step should handle empty state gracefully."
+            "Requirement: /simulate/step should handle empty state gracefully."
         )
 
     def test_multiple_steps_accumulate_time(self, session, reset_state):
@@ -67,10 +67,10 @@ class TestSimulateStep:
             r = post_step(session, 60)
             assert r.status_code == 200
             last_ts = r.json().get("new_timestamp", "")
-        # After 5×60=300s, time should be 08:05:00
+        # After 5Ã—60=300s, time should be 08:05:00
         assert "08:05:00" in last_ts, (
-            f"After 5×60s steps, expected 08:05:00 in timestamp, got '{last_ts}'. "
-            "FIX: Sim clock must accumulate steps correctly."
+            f"After 5Ã—60s steps, expected 08:05:00 in timestamp, got '{last_ts}'. "
+            "Requirement: Sim clock must accumulate steps correctly."
         )
 
     @pytest.mark.slow
@@ -82,7 +82,7 @@ class TestSimulateStep:
         assert r.status_code == 200, f"Step failed: {r.status_code}: {r.text}"
         assert ms < 30_000, (
             f"/simulate/step with 50 sats + 100 debris took {ms:.0f} ms (limit 30000 ms). "
-            "FIX: Parallelize physics propagation with Numba @njit(parallel=True)."
+            "Requirement: Parallelize physics propagation with Numba @njit(parallel=True)."
         )
 
     def test_step_seconds_range(self, session, reset_state):
@@ -98,5 +98,6 @@ class TestSimulateStep:
         r2 = post_step(session, 86400)
         assert r2.status_code == 200, (
             f"step=86400 failed with {r2.status_code}: {r2.text}. "
-            "FIX: Accept any step_seconds value in [1, 86400]."
+            "Requirement: Accept any step_seconds value in [1, 86400]."
         )
+

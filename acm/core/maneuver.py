@@ -14,6 +14,16 @@ STANDOFF_HIGH = 0.500   # km — nominal standoff (fuel > 50%)
 STANDOFF_MED = 0.200    # km — reduced standoff (10-50% fuel)
 EOL_FUEL_FRACTION = 0.10
 
+# Initial guesses for multi-start SLSQP (RTN frame, km/s)
+# Cover prograde, retrograde, radial, normal, and diagonal directions
+_SLSQP_SEEDS = [
+    np.array([0.0,  0.003,  0.0]),   # prograde (main)
+    np.array([0.0, -0.003,  0.0]),   # retrograde
+    np.array([0.003, 0.0,   0.0]),   # radial outward
+    np.array([0.0,  0.003,  0.003]), # prograde + normal
+    np.array([0.003, 0.003, 0.0]),   # radial + prograde
+]
+
 
 def rtn_to_eci_matrix(sat_state: np.ndarray) -> np.ndarray:
     """
@@ -44,13 +54,19 @@ def dv_rtn_to_eci(dv_rtn: np.ndarray, sat_state: np.ndarray) -> np.ndarray:
 
 
 def _miss_after_burn(dv_rtn: np.ndarray, sat_state: np.ndarray, deb_state: np.ndarray,
-                     tca_s: float) -> float:
-    """Compute miss distance at TCA after applying dv_rtn to satellite."""
+                     tca_s: float, step: float = 0.0) -> float:
+    """Compute miss distance at TCA after applying dv_rtn to satellite.
+    step=0 (auto): uses tca_s/40 capped at [30, 300]s — fast for large TCA times.
+    step>0: exact value used (e.g. 30.0 for final accuracy check).
+    """
+    if step <= 0.0:
+        # Auto step: at most 40 RK4 steps regardless of TCA, min 30s, max 300s
+        step = float(np.clip(tca_s / 40.0, 30.0, 300.0))
     dv_eci = dv_rtn_to_eci(dv_rtn, sat_state)
     new_sat = sat_state.copy()
     new_sat[3:6] += dv_eci
     combined = np.vstack([new_sat.reshape(1, 6), deb_state.reshape(1, 6)])
-    propagated = propagate(combined, tca_s, step=30.0)
+    propagated = propagate(combined, tca_s, step=step)
     return float(np.linalg.norm(propagated[0, :3] - propagated[1, :3]))
 
 
@@ -58,32 +74,30 @@ def compute_evasion_burn(sat_state: np.ndarray, deb_state: np.ndarray,
                           tca_s: float, fuel_kg: float,
                           sat_id: str) -> Tuple[np.ndarray, float, bool]:
     """
-    SLSQP constrained minimization for minimum-fuel evasion.
+    Multi-start SLSQP constrained minimization for minimum-fuel evasion.
+    Tries 5 RTN seed directions; picks the best feasible result.
+    Falls back to maximum prograde only if all seeds fail.
     Returns (dv_eci_km_s, dv_magnitude_km_s, is_fallback)
     """
     wet_mass = M_DRY + fuel_kg
-    fuel_fraction = fuel_kg / 50.0  # fraction of initial fuel
+    fuel_fraction = fuel_kg / 50.0
 
-    # Choose standoff based on fuel level
     if fuel_fraction < EOL_FUEL_FRACTION:
-        # Very low fuel — use minimum standoff
         standoff = 0.100
     elif fuel_fraction < 0.5:
         standoff = STANDOFF_MED
     else:
         standoff = STANDOFF_HIGH
 
-    # Objective: minimize |dv_rtn|
-    def objective(dv): return np.linalg.norm(dv)
+    def objective(dv): return float(np.linalg.norm(dv))
 
-    # Constraint: miss at TCA >= standoff
+    # Auto-step constraint functions (≤40 RK4 steps per eval, capped 30–300s)
     def miss_constraint(dv):
-        return _miss_after_burn(dv, sat_state, deb_state, tca_s) - standoff
+        return _miss_after_burn(dv, sat_state, deb_state, tca_s, step=0.0) - standoff
 
-    # Constraint: fuel must remain positive after burn
     def fuel_constraint(dv):
-        dm = tsiolkovsky_dm(wet_mass, np.linalg.norm(dv))
-        return fuel_kg - dm - 0.5  # keep 0.5 kg margin
+        dm = tsiolkovsky_dm(wet_mass, float(np.linalg.norm(dv)))
+        return fuel_kg - dm - 0.5
 
     constraints = [
         {'type': 'ineq', 'fun': miss_constraint},
@@ -91,31 +105,51 @@ def compute_evasion_burn(sat_state: np.ndarray, deb_state: np.ndarray,
     ]
     bounds = [(-MAX_DV_KM_S, MAX_DV_KM_S)] * 3
 
-    # Initial guess: prograde bias
-    x0 = np.array([0.0, 0.003, 0.0])
+    best_dv_rtn: Optional[np.ndarray] = None
+    best_mag = np.inf
 
-    try:
-        result = minimize(
-            fun=objective,
-            x0=x0,
-            method='SLSQP',
-            bounds=bounds,
-            constraints=constraints,
-            options={'ftol': 1e-8, 'maxiter': 200}
-        )
-        if result.success and np.linalg.norm(result.x) <= MAX_DV_KM_S:
-            dv_rtn = result.x
-            is_fallback = False
-        else:
-            raise ValueError("SLSQP failed")
-    except Exception:
-        # Fallback: maximum prograde burn
-        dv_rtn = np.array([0.0, MAX_DV_KM_S, 0.0])
-        is_fallback = True
+    for x0 in _SLSQP_SEEDS:
+        try:
+            result = minimize(
+                fun=objective,
+                x0=x0.copy(),
+                method='SLSQP',
+                bounds=bounds,
+                constraints=constraints,
+                options={'ftol': 1e-9, 'maxiter': 150}
+            )
+            if not result.success:
+                continue
+            dv_mag = float(np.linalg.norm(result.x))
+            if dv_mag > MAX_DV_KM_S:
+                continue
+            # Verify constraint satisfied with accurate step (30s sub-steps)
+            actual_miss = _miss_after_burn(result.x, sat_state, deb_state, tca_s, step=30.0)
+            if actual_miss < standoff * 0.9:
+                continue  # fast-step said OK but accurate check failed — skip
+            if dv_mag < best_mag:
+                best_mag = dv_mag
+                best_dv_rtn = result.x.copy()
+        except Exception:
+            continue
 
+    if best_dv_rtn is not None:
+        dv_eci = dv_rtn_to_eci(best_dv_rtn, sat_state)
+        return dv_eci, float(np.linalg.norm(dv_eci)), False
+
+    # All seeds failed — fallback: prograde burn scaled to clear standoff
+    # Try progressively larger prograde burns until standoff is met
+    for dv_mag_try in [0.005, 0.008, 0.010, MAX_DV_KM_S]:
+        dv_rtn_try = np.array([0.0, dv_mag_try, 0.0])
+        miss = _miss_after_burn(dv_rtn_try, sat_state, deb_state, tca_s, step=0.0)
+        if miss >= standoff * 0.5:  # accept partial standoff in fallback
+            dv_eci = dv_rtn_to_eci(dv_rtn_try, sat_state)
+            return dv_eci, float(np.linalg.norm(dv_eci)), True
+
+    # Absolute fallback: max prograde
+    dv_rtn = np.array([0.0, MAX_DV_KM_S, 0.0])
     dv_eci = dv_rtn_to_eci(dv_rtn, sat_state)
-    dv_mag = float(np.linalg.norm(dv_eci))
-    return dv_eci, dv_mag, is_fallback
+    return dv_eci, float(np.linalg.norm(dv_eci)), True
 
 
 def compute_recovery_burns(sat_state_post_evasion: np.ndarray,

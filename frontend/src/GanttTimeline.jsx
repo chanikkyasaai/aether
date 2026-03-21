@@ -2,13 +2,14 @@ import React, { useEffect, useRef, useMemo } from 'react'
 import * as d3 from 'd3'
 
 const BURN_COLORS = {
-  EVASION: '#2563eb',
+  EVASION:    '#2563eb',
   RECOVERY_1: '#0d9488',
   RECOVERY_2: '#0d9488',
-  GRAVEYARD: '#7c3aed',
-  MANUAL: '#6b7280',
+  GRAVEYARD:  '#7c3aed',
+  MANUAL:     '#6b7280',
 }
-const COOLDOWN_COLOR = '#374151'
+const COOLDOWN_COLOR  = '#374151'
+const BLACKOUT_COLOR  = '#7f1d1d'   // dark red — no ground-station LOS
 const CURRENT_TIME_COLOR = '#ef4444'
 const COOLDOWN_S = 600
 
@@ -16,42 +17,48 @@ export default function GanttTimeline({ snapshot, status }) {
   const svgRef = useRef(null)
   const containerRef = useRef(null)
 
-  // Use scheduled_burns from status (full maneuver queue) + executed burns from recent_events
+  // All satellite IDs — show rows for every tracked satellite, not just those with burns
+  const allSatIds = useMemo(() => {
+    const fromSnapshot = (snapshot?.satellites || []).map(s => s.id)
+    const fromBurns    = [
+      ...(status?.scheduled_burns || []).map(b => b.satellite_id),
+      ...(status?.recent_events   || [])
+          .filter(e => e.event_type === 'BURN_EXECUTED')
+          .map(e => e.sat_id),
+    ]
+    const merged = [...new Set([...fromSnapshot, ...fromBurns])].filter(Boolean)
+    merged.sort()
+    return merged
+  }, [snapshot, status])
+
+  // Build burn event list (scheduled + executed)
   const burnEvents = useMemo(() => {
     const burns = []
-
-    // Upcoming/queued burns from the live queue
     for (const b of (status?.scheduled_burns || [])) {
       burns.push({
-        sat_id: b.satellite_id,
-        burn_id: b.burn_id,
-        burn_time: b.burn_time_s,
-        burn_type: b.burn_type,
-        dv_m_s: b.dv_magnitude_m_s || 0,
-        fuel_cost: 0,
-        queued: true,
+        sat_id: b.satellite_id, burn_id: b.burn_id,
+        burn_time: b.burn_time_s, burn_type: b.burn_type,
+        dv_m_s: b.dv_magnitude_m_s || 0, fuel_cost: 0, queued: true,
       })
     }
-
-    // Executed burns from recent_events (historical)
     for (const ev of (status?.recent_events || [])) {
       if (ev.event_type === 'BURN_EXECUTED') {
         burns.push({
-          sat_id: ev.sat_id,
-          burn_id: ev.burn_id || '',
+          sat_id: ev.sat_id, burn_id: ev.burn_id || '',
           burn_time: ev.sim_time_s || 0,
           burn_type: (ev.burn_id || '').split('_')[0] || 'MANUAL',
           dv_m_s: ev.dv_magnitude_m_s || 0,
-          fuel_cost: ev.fuel_cost_kg || 0,
-          queued: false,
+          fuel_cost: ev.fuel_cost_kg || 0, queued: false,
         })
       }
     }
     return burns
   }, [status])
 
+  // LOS blackout windows keyed by sat_id
+  const losWindows = useMemo(() => status?.sat_los_windows || {}, [status])
+
   const currentTime = useMemo(() => {
-    if (!status?.sim_time_iso) return 0
     const events = status?.recent_events || []
     if (events.length > 0) return events[events.length - 1].sim_time_s || 0
     return 0
@@ -60,40 +67,32 @@ export default function GanttTimeline({ snapshot, status }) {
   useEffect(() => {
     if (!svgRef.current || !containerRef.current) return
     const container = containerRef.current
-    const W = container.clientWidth || 600
+    const W = container.clientWidth  || 600
     const H = container.clientHeight || 200
 
     const margin = { top: 8, right: 16, bottom: 24, left: 90 }
     const innerW = W - margin.left - margin.right
     const innerH = H - margin.top - margin.bottom
 
-    // Get unique satellites with burns
-    const satIds = [...new Set(burnEvents.map(b => b.sat_id))].filter(Boolean)
-    if (satIds.length === 0) {
-      // Draw empty state
-      const svg = d3.select(svgRef.current)
-      svg.selectAll('*').remove()
-      svg.attr('width', W).attr('height', H)
-      svg.append('text')
-        .attr('x', W / 2).attr('y', H / 2)
-        .attr('text-anchor', 'middle')
-        .attr('fill', '#475569')
-        .attr('font-size', 12)
-        .attr('font-family', 'monospace')
-        .text('No maneuvers scheduled — system nominal')
-      return
-    }
-
-    const rowH = Math.min(28, innerH / satIds.length)
-
-    // Time domain: currentTime ± 6 hours
-    const t0 = currentTime - 3600
-    const t1 = currentTime + 21600
-    const xScale = d3.scaleLinear().domain([t0, t1]).range([0, innerW])
+    const satIds = allSatIds.length > 0 ? allSatIds : [...new Set(burnEvents.map(b => b.sat_id))].filter(Boolean)
 
     const svg = d3.select(svgRef.current)
     svg.selectAll('*').remove()
     svg.attr('width', W).attr('height', H)
+
+    if (satIds.length === 0) {
+      svg.append('text')
+        .attr('x', W / 2).attr('y', H / 2)
+        .attr('text-anchor', 'middle').attr('fill', '#475569')
+        .attr('font-size', 12).attr('font-family', 'monospace')
+        .text('No satellites tracked — awaiting telemetry')
+      return
+    }
+
+    const rowH = Math.min(28, innerH / satIds.length)
+    const t0 = currentTime - 3600
+    const t1 = currentTime + 21600
+    const xScale = d3.scaleLinear().domain([t0, t1]).range([0, innerW])
 
     const g = svg.append('g').attr('transform', `translate(${margin.left},${margin.top})`)
 
@@ -108,57 +107,63 @@ export default function GanttTimeline({ snapshot, status }) {
         .attr('fill', i % 2 === 0 ? '#0a1420' : '#0d1f3c')
     })
 
+    // Blackout zones — red overlay where no ground station LOS
+    satIds.forEach((satId, i) => {
+      const windows = losWindows[satId] || []
+      windows.forEach(w => {
+        const x1 = xScale(w.start_s)
+        const x2 = xScale(w.end_s)
+        if (x2 < 0 || x1 > innerW) return
+        g.append('rect')
+          .attr('x', Math.max(0, x1)).attr('y', i * rowH)
+          .attr('width', Math.min(x2, innerW) - Math.max(0, x1)).attr('height', rowH)
+          .attr('fill', BLACKOUT_COLOR).attr('opacity', 0.35)
+          .append('title').text(`${satId}: No LOS`)
+      })
+    })
+
     // Grid lines (1-hour intervals)
-    const hourTicks = xScale.ticks(12)
     g.selectAll('.grid-line')
-      .data(hourTicks)
-      .join('line')
-      .attr('class', 'grid-line')
+      .data(xScale.ticks(12))
+      .join('line').attr('class', 'grid-line')
       .attr('x1', d => xScale(d)).attr('x2', d => xScale(d))
       .attr('y1', 0).attr('y2', innerH)
       .attr('stroke', '#1e3a5f').attr('stroke-width', 0.5)
 
     // X axis
-    const xAxis = d3.axisBottom(xScale)
-      .ticks(8)
-      .tickFormat(d => {
-        const dt = d - currentTime
-        const h = Math.floor(Math.abs(dt) / 3600)
-        const m = Math.floor((Math.abs(dt) % 3600) / 60)
-        const sign = dt < 0 ? '-' : '+'
-        return `${sign}${h}h${m.toString().padStart(2, '0')}m`
-      })
-
     g.append('g')
       .attr('transform', `translate(0,${innerH})`)
-      .call(xAxis)
+      .call(d3.axisBottom(xScale).ticks(8).tickFormat(d => {
+        const dt = d - currentTime
+        const h  = Math.floor(Math.abs(dt) / 3600)
+        const m  = Math.floor((Math.abs(dt) % 3600) / 60)
+        return `${dt < 0 ? '-' : '+'}${h}h${m.toString().padStart(2, '0')}m`
+      }))
       .selectAll('text').attr('fill', '#475569').attr('font-size', 9).attr('font-family', 'monospace')
     g.selectAll('.domain,.tick line').attr('stroke', '#1e3a5f')
 
-    // Burn blocks
+    // Burn blocks + cooldown
     burnEvents.forEach(burn => {
       const satIdx = satIds.indexOf(burn.sat_id)
       if (satIdx < 0) return
       const y = satIdx * rowH + 2
       const h = rowH - 4
-      const burnDuration = 60 // 60s burn block display
+      const DURATION = 60
       const color = BURN_COLORS[burn.burn_type] || BURN_COLORS.MANUAL
-
       const x1 = xScale(burn.burn_time)
-      const x2 = xScale(burn.burn_time + burnDuration)
+      const x2 = xScale(burn.burn_time + DURATION)
       if (x2 < 0 || x1 > innerW) return
 
-      // Burn block
       g.append('rect')
         .attr('x', Math.max(0, x1)).attr('y', y)
         .attr('width', Math.min(x2, innerW) - Math.max(0, x1)).attr('height', h)
-        .attr('fill', color).attr('rx', 2).attr('opacity', 0.85)
+        .attr('fill', color).attr('rx', 2).attr('opacity', burn.queued ? 0.95 : 0.6)
         .append('title')
         .text(`${burn.burn_id}\n${burn.sat_id}\nΔV: ${burn.dv_m_s.toFixed(1)} m/s\nFuel: ${burn.fuel_cost.toFixed(2)} kg`)
 
-      // Cooldown block
-      const cx1 = xScale(burn.burn_time + burnDuration)
-      const cx2 = xScale(burn.burn_time + burnDuration + COOLDOWN_S)
+      // Cooldown
+      const cx1 = xScale(burn.burn_time + DURATION)
+      const cx2 = xScale(burn.burn_time + DURATION + COOLDOWN_S)
       if (cx1 < innerW && cx2 > 0) {
         g.append('rect')
           .attr('x', Math.max(0, cx1)).attr('y', y)
@@ -171,8 +176,8 @@ export default function GanttTimeline({ snapshot, status }) {
     satIds.forEach((satId, i) => {
       g.append('text')
         .attr('x', -4).attr('y', i * rowH + rowH / 2 + 4)
-        .attr('text-anchor', 'end')
-        .attr('fill', '#94a3b8').attr('font-size', 9).attr('font-family', 'monospace')
+        .attr('text-anchor', 'end').attr('fill', '#94a3b8')
+        .attr('font-size', 9).attr('font-family', 'monospace')
         .text(satId.replace('SAT-', ''))
     })
 
@@ -180,22 +185,22 @@ export default function GanttTimeline({ snapshot, status }) {
     const ctX = xScale(currentTime)
     if (ctX >= 0 && ctX <= innerW) {
       g.append('line')
-        .attr('x1', ctX).attr('x2', ctX)
-        .attr('y1', 0).attr('y2', innerH)
+        .attr('x1', ctX).attr('x2', ctX).attr('y1', 0).attr('y2', innerH)
         .attr('stroke', CURRENT_TIME_COLOR).attr('stroke-width', 2).attr('opacity', 0.8)
       g.append('text')
-        .attr('x', ctX + 2).attr('y', 10)
-        .attr('fill', CURRENT_TIME_COLOR).attr('font-size', 9).attr('font-family', 'monospace')
-        .text('NOW')
+        .attr('x', ctX + 2).attr('y', 10).attr('fill', CURRENT_TIME_COLOR)
+        .attr('font-size', 9).attr('font-family', 'monospace').text('NOW')
     }
 
     // Legend
     const legendData = [
-      { label: 'EVASION', color: BURN_COLORS.EVASION },
+      { label: 'EVASION',  color: BURN_COLORS.EVASION },
       { label: 'RECOVERY', color: BURN_COLORS.RECOVERY_1 },
+      { label: 'GRAVEYARD',color: BURN_COLORS.GRAVEYARD },
       { label: 'COOLDOWN', color: COOLDOWN_COLOR },
+      { label: 'BLACKOUT', color: BLACKOUT_COLOR },
     ]
-    const lg = svg.append('g').attr('transform', `translate(${W - 180}, 4)`)
+    const lg = svg.append('g').attr('transform', `translate(${W - 300}, 4)`)
     legendData.forEach((d, i) => {
       lg.append('rect').attr('x', i * 60).attr('y', 0).attr('width', 10).attr('height', 8)
         .attr('fill', d.color).attr('rx', 1)
@@ -204,7 +209,7 @@ export default function GanttTimeline({ snapshot, status }) {
         .text(d.label)
     })
 
-  }, [burnEvents, currentTime])
+  }, [allSatIds, burnEvents, losWindows, currentTime])
 
   return (
     <div ref={containerRef} style={{ width: '100%', height: '100%', overflow: 'hidden' }}>

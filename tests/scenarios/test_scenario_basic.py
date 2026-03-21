@@ -1,6 +1,6 @@
-"""
+﻿"""
 Basic end-to-end scenarios.
-Tests full lifecycle flows: ingest → step → snapshot → status → reset.
+Tests full lifecycle flows: ingest â†’ step â†’ snapshot â†’ status â†’ reset.
 """
 import pytest
 import sys
@@ -38,11 +38,11 @@ class TestScenarioBasic:
         )
         assert sat is not None, (
             "SAT-LIFE-01 disappeared from snapshot after 10 steps. "
-            "FIX: Satellites must persist across propagation steps."
+            "Requirement: Satellites must persist across propagation steps."
         )
         assert sat["status"] == "NOMINAL", (
             f"SAT-LIFE-01 status is '{sat['status']}' after 10 quiet steps, expected NOMINAL. "
-            "FIX: Status should stay NOMINAL when no conjunctions exist."
+            "Requirement: Status should stay NOMINAL when no conjunctions exist."
         )
 
     def test_telemetry_then_snapshot(self, session, reset_state):
@@ -58,7 +58,7 @@ class TestScenarioBasic:
         sats = snap.get("satellites", [])
         assert len(sats) == 5, (
             f"Expected 5 satellites in snapshot, got {len(sats)}. "
-            "FIX: All ingested satellites must appear in /visualization/snapshot."
+            "Requirement: All ingested satellites must appear in /visualization/snapshot."
         )
         for sat in sats:
             assert -90 <= sat["lat"] <= 90, (
@@ -87,12 +87,12 @@ class TestScenarioBasic:
         assert time_after != time_before, (
             f"sim_time_iso did not change after step: before='{time_before}', "
             f"after='{time_after}'. "
-            "FIX: /simulate/step must advance sim_state.current_time_s and update status."
+            "Requirement: /simulate/step must advance sim_state.current_time_s and update status."
         )
 
     def test_reset_clears_state(self, session, reset_state):
         """
-        Load 50 satellites, then POST /api/reset → status must show 0 satellites tracked.
+        Load 50 satellites, then POST /api/reset â†’ status must show 0 satellites tracked.
         Note: reset_state fixture already calls reset before each test.
         This test verifies the reset endpoint explicitly.
         """
@@ -114,7 +114,7 @@ class TestScenarioBasic:
         status_clear = get_status(session).json()
         assert status_clear["satellites_tracked"] == 0, (
             f"After reset, satellites_tracked={status_clear['satellites_tracked']}, expected 0. "
-            "FIX: /api/reset must clear all satellites, debris, maneuvers and reset counters."
+            "Requirement: /api/reset must clear all satellites, debris, maneuvers and reset counters."
         )
         assert status_clear["debris_tracked"] == 0, (
             f"After reset, debris_tracked={status_clear['debris_tracked']}, expected 0."
@@ -122,3 +122,4 @@ class TestScenarioBasic:
         assert status_clear["total_collisions"] == 0, (
             f"After reset, total_collisions={status_clear['total_collisions']}, expected 0."
         )
+

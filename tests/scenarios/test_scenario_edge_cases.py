@@ -1,4 +1,4 @@
-"""
+﻿"""
 Edge case scenarios.
 Tests boundary conditions, malformed inputs, and unusual but valid request patterns.
 """
@@ -22,7 +22,7 @@ class TestScenarioEdgeCases:
         r = post_step(session, 60)
         assert r.status_code == 200, (
             f"Expected 200 for step with no objects, got {r.status_code}: {r.text}. "
-            "FIX: Guard empty-state step with early return, not an error."
+            "Requirement: Guard empty-state step with early return, not an error."
         )
 
     def test_duplicate_satellite_id_handling(self, session, reset_state):
@@ -37,14 +37,14 @@ class TestScenarioEdgeCases:
         r = session.post(f"{BASE_URL}/api/telemetry", json=payload, timeout=10)
         assert r.status_code in (200, 422), (
             f"Duplicate ID in payload returned unexpected status {r.status_code}: {r.text}. "
-            "FIX: Handle duplicate IDs by deduplicating or returning 422."
+            "Requirement: Handle duplicate IDs by deduplicating or returning 422."
         )
         if r.status_code == 200:
             status = get_status(session).json()
             # Should have at most 1 satellite (deduplicated)
             assert status["satellites_tracked"] <= 1, (
                 f"Duplicate satellite ID created {status['satellites_tracked']} entries. "
-                "FIX: Use upsert (overwrite) on duplicate IDs."
+                "Requirement: Use upsert (overwrite) on duplicate IDs."
             )
 
     def test_very_large_step_seconds(self, session, reset_state):
@@ -54,7 +54,7 @@ class TestScenarioEdgeCases:
         r = post_step(session, 86400)
         assert r.status_code == 200, (
             f"step=86400 returned {r.status_code}: {r.text}. "
-            "FIX: Accept any step_seconds up to 86400 without error."
+            "Requirement: Accept any step_seconds up to 86400 without error."
         )
 
     def test_single_debris_no_satellite(self, session, reset_state):
@@ -65,7 +65,7 @@ class TestScenarioEdgeCases:
         r = post_step(session, 60)
         assert r.status_code == 200, (
             f"Step with only debris failed: {r.status_code}: {r.text}. "
-            "FIX: Step must handle debris-only state without crash."
+            "Requirement: Step must handle debris-only state without crash."
         )
         status = get_status(session).json()
         assert status["debris_tracked"] > 0, (
@@ -80,13 +80,13 @@ class TestScenarioEdgeCases:
         r = post_maneuver(session, "SAT-EM-01", [])  # empty sequence
         assert r.status_code in (400, 422), (
             f"Expected 400 or 422 for empty maneuver_sequence, got {r.status_code}: {r.text}. "
-            "FIX: Validate that maneuver_sequence is non-empty."
+            "Requirement: Validate that maneuver_sequence is non-empty."
         )
 
     def test_burn_time_in_past(self, session, reset_state):
         """
         Scheduling a burn with burnTime before current sim time must be handled
-        gracefully — either accepted (and executed immediately) or rejected with 4xx.
+        gracefully â€” either accepted (and executed immediately) or rejected with 4xx.
         Must not crash the server.
         """
         state = circular_orbit_state(CONSTELLATION_ALT)
@@ -98,14 +98,15 @@ class TestScenarioEdgeCases:
         # Now schedule a burn in the "past" (before current sim time)
         r = post_maneuver(session, "SAT-PAST-01", [{
             "burn_id": "BURN-PAST",
-            "burnTime": "2026-03-12T08:00:30.000Z",  # 30 s into epoch — before t+120
+            "burnTime": "2026-03-12T08:00:30.000Z",  # 30 s into epoch â€” before t+120
             "deltaV_vector": {"x": 0.0, "y": 0.001, "z": 0.0}
         }])
-        # Server may accept (200/202) or reject (400/422) — must not 500
+        # Server may accept (200/202) or reject (400/422) â€” must not 500
         assert r.status_code != 500, (
             f"Server returned 500 for past burnTime: {r.text[:200]}. "
-            "FIX: Handle past burnTime gracefully — reject with 422 or execute immediately."
+            "Requirement: Handle past burnTime gracefully â€” reject with 422 or execute immediately."
         )
         assert r.status_code in (200, 202, 400, 422), (
             f"Unexpected status {r.status_code} for past burnTime."
         )
+

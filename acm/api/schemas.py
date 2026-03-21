@@ -123,3 +123,4 @@ class StatusResponse(BaseModel):
     recent_events: List[Dict[str, Any]]
     active_cdms: List[ActiveCDM] = []
     scheduled_burns: List[ScheduledBurnInfo] = []
+    sat_los_windows: Dict[str, List[Dict[str, float]]] = {}  # {sat_id: [{start_s, end_s}]}

@@ -65,6 +65,7 @@ class SimState:
         # Pre-computed caches — rebuilt after each step/telemetry ingest
         self._debris_cloud_cache: list = []   # [[id, lat, lon, alt_km], ...]
         self._snapshot_json_cache: bytes = b''  # full snapshot pre-serialized to JSON bytes
+        self.sat_los_cache: dict = {}  # {sat_id: [{"start_s": float, "end_s": float}, ...]}
 
         # Burn ID counter per satellite
         self._burn_counters: dict = {}

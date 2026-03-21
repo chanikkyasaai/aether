@@ -1,4 +1,4 @@
-"""
+﻿"""
 AETHER Test Infrastructure
 Shared fixtures, helpers, and orbital mechanics utilities.
 All tests import from here.
@@ -12,12 +12,12 @@ import requests
 from datetime import datetime, timezone, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-# ── Physical constants (exact spec values) ──────────────────────────────────
-RE   = 6378.137        # km — Earth equatorial radius (WGS84)
-MU   = 398600.4418     # km³/s² — Earth gravitational parameter
-J2   = 1.08263e-3      # dimensionless — second zonal harmonic
-G0   = 0.00980665      # km/s² — standard gravity
-ISP  = 300.0           # s — monopropellant specific impulse
+# â”€â”€ Physical constants (exact spec values) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+RE   = 6378.137        # km â€” Earth equatorial radius (WGS84)
+MU   = 398600.4418     # kmÂ³/sÂ² â€” Earth gravitational parameter
+J2   = 1.08263e-3      # dimensionless â€” second zonal harmonic
+G0   = 0.00980665      # km/sÂ² â€” standard gravity
+ISP  = 300.0           # s â€” monopropellant specific impulse
 M_DRY      = 500.0     # kg
 M_FUEL     = 50.0      # kg
 M_WET      = M_DRY + M_FUEL  # 550.0 kg
@@ -34,11 +34,11 @@ BASE_URL   = os.environ.get("AETHER_URL", "http://localhost:8000")
 TEST_EPOCH = "2026-03-12T08:00:00.000Z"
 
 
-# ── Server session ──────────────────────────────────────────────────────────
+# â”€â”€ Server session â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @pytest.fixture(scope="session")
 def session():
-    """Requests session — kept alive for whole test session."""
+    """Requests session â€” kept alive for whole test session."""
     s = requests.Session()
     s.headers.update({"Content-Type": "application/json"})
     # Verify server is up
@@ -55,12 +55,12 @@ def reset_state(session):
     """Reset sim state before every test. Requires TEST_MODE=1 on server."""
     r = session.post(f"{BASE_URL}/api/reset", timeout=10)
     if r.status_code == 403:
-        pytest.skip("Server not in TEST_MODE — set TEST_MODE=1 env var")
+        pytest.skip("Server not in TEST_MODE â€” set TEST_MODE=1 env var")
     assert r.status_code == 200, f"Reset failed: {r.status_code} {r.text}"
     yield
 
 
-# ── Orbital mechanics helpers ────────────────────────────────────────────────
+# â”€â”€ Orbital mechanics helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def circular_orbit_state(alt_km: float, true_anomaly_deg: float = 0.0,
                           inclination_deg: float = 53.0,
@@ -140,7 +140,7 @@ def converging_debris(sat_state: np.ndarray, miss_km: float,
 
 
 def diverging_debris(sat_state: np.ndarray, separation_km: float = 200.0) -> np.ndarray:
-    """Creates debris that is moving away — should NOT trigger CDM."""
+    """Creates debris that is moving away â€” should NOT trigger CDM."""
     sat_pos = sat_state[:3].copy()
     sat_vel = sat_state[3:6].copy()
 
@@ -167,7 +167,7 @@ def make_telemetry_payload(objects: list, timestamp: str = TEST_EPOCH) -> dict:
     return {"timestamp": timestamp, "objects": objects}
 
 
-# ── API helpers ──────────────────────────────────────────────────────────────
+# â”€â”€ API helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def post_telemetry(session, objects: list, timestamp: str = TEST_EPOCH) -> requests.Response:
     payload = make_telemetry_payload(objects, timestamp)
@@ -228,13 +228,13 @@ def load_constellation_50(session, n_debris: int = 100,
     return r.json()
 
 
-# ── Assertion helpers ────────────────────────────────────────────────────────
+# â”€â”€ Assertion helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def assert_response_time(response_time_ms: float, limit_ms: float, label: str = ""):
     assert response_time_ms < limit_ms, (
         f"{label} latency {response_time_ms:.1f}ms exceeds {limit_ms}ms limit. "
-        f"DIAGNOSIS: Numba JIT not parallelized or KD-tree not used. "
-        f"FIX: Check physics.py @njit(parallel=True) and conjunction.py KDTree."
+        f"Check: Numba JIT not parallelized or KD-tree not used. "
+        f"Requirement: Check physics.py @njit(parallel=True) and conjunction.py KDTree."
     )
 
 
@@ -251,3 +251,5 @@ def timed_get(session, url: str) -> tuple:
     r = session.get(url, timeout=10)
     ms = (time.perf_counter() - t0) * 1000
     return r, ms
+
+

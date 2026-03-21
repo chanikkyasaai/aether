@@ -1,4 +1,4 @@
-"""
+﻿"""
 Stress tests.
 Tests server stability under heavy load, concurrent requests, and repeated cycles.
 """
@@ -27,7 +27,7 @@ class TestScenarioStress:
             r = post_step(session, 60)
             assert r.status_code == 200, (
                 f"Step {i+1} failed: {r.status_code}: {r.text}. "
-                "FIX: Server must handle 1000-debris propagation without crash."
+                "Requirement: Server must handle 1000-debris propagation without crash."
             )
             assert r.json().get("status") == "STEP_COMPLETE", (
                 f"Step {i+1} returned unexpected status: {r.json()}."
@@ -63,19 +63,19 @@ class TestScenarioStress:
 
         assert len(errors) == 0, (
             f"Concurrent step errors: {errors}. "
-            "FIX: Protect /simulate/step with a threading.Lock()."
+            "Requirement: Protect /simulate/step with a threading.Lock()."
         )
         assert all(s == 200 for s in results), (
             f"Not all concurrent step requests returned 200: {results}. "
-            "FIX: Serialise concurrent step requests without returning errors."
+            "Requirement: Serialise concurrent step requests without returning errors."
         )
         assert len(results) == 5, f"Only {len(results)}/5 step requests completed."
 
     @pytest.mark.slow
     def test_rapid_reset_reload_cycle(self, session, reset_state):
         """
-        10 cycles of (reset → load 50 sats → step): each cycle must produce
-        consistent, valid results — no accumulating state or memory corruption.
+        10 cycles of (reset â†’ load 50 sats â†’ step): each cycle must produce
+        consistent, valid results â€” no accumulating state or memory corruption.
         """
         for cycle in range(10):
             # Reset
@@ -141,3 +141,4 @@ class TestScenarioStress:
                 f"Step {i+1}: fleet_fuel_remaining_kg is negative: "
                 f"{status['fleet_fuel_remaining_kg']}."
             )
+
