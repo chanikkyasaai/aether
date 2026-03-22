@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -s --max-time 5 http://localhost:8000/api/status)",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(''''alive | sats:'''', d[''''satellites_tracked''''], ''''| cdm:'''', d[''''active_cdm_warnings''''], ''''| queue:'''', d[''''maneuvers_queued'''']\\)\")"
+    ]
+  }
+}

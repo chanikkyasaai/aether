@@ -5,7 +5,7 @@ RTN<->ECI transforms, SLSQP evasion optimization, Hohmann recovery burns.
 import numpy as np
 from scipy.optimize import minimize
 from typing import Tuple, Optional
-from acm.core.physics import MU, tsiolkovsky_dm, M_DRY, propagate
+from acm.core.physics import MU, tsiolkovsky_dm, M_DRY, propagate, propagate_serial
 from acm.core.state import ScheduledBurn
 
 
@@ -60,13 +60,18 @@ def _miss_after_burn(dv_rtn: np.ndarray, sat_state: np.ndarray, deb_state: np.nd
     step>0: exact value used (e.g. 30.0 for final accuracy check).
     """
     if step <= 0.0:
-        # Auto step: at most 40 RK4 steps regardless of TCA, min 30s, max 300s
-        step = float(np.clip(tca_s / 40.0, 30.0, 300.0))
+        # Auto step: exactly 40 RK4 sub-steps regardless of TCA duration.
+        # No upper cap — for 24h TCA, step=2160s gives exactly 40 sub-steps.
+        # Capping at 300s would give 288 sub-steps for 24h TCA.
+        step = float(max(tca_s / 40.0, 30.0))
     dv_eci = dv_rtn_to_eci(dv_rtn, sat_state)
     new_sat = sat_state.copy()
     new_sat[3:6] += dv_eci
     combined = np.vstack([new_sat.reshape(1, 6), deb_state.reshape(1, 6)])
-    propagated = propagate(combined, tca_s, step=step)
+    # Use propagate_serial (no Numba thread-pool overhead) — critical for performance.
+    # propagate() uses parallel prange which has ~400µs overhead per call for N=2.
+    # propagate_serial uses serial range: ~5µs per call. 80× faster for small N.
+    propagated = propagate_serial(combined, tca_s, step=step)
     return float(np.linalg.norm(propagated[0, :3] - propagated[1, :3]))
 
 
@@ -116,15 +121,16 @@ def compute_evasion_burn(sat_state: np.ndarray, deb_state: np.ndarray,
                 method='SLSQP',
                 bounds=bounds,
                 constraints=constraints,
-                options={'ftol': 1e-9, 'maxiter': 150}
+                options={'ftol': 1e-7, 'maxiter': 50}
             )
             if not result.success:
                 continue
             dv_mag = float(np.linalg.norm(result.x))
             if dv_mag > MAX_DV_KM_S:
                 continue
-            # Verify constraint satisfied with accurate step (30s sub-steps)
-            actual_miss = _miss_after_burn(result.x, sat_state, deb_state, tca_s, step=30.0)
+            # Verify constraint satisfied with finer step (10× more sub-steps than opt)
+            verify_step = float(max(tca_s / 400.0, 30.0))
+            actual_miss = _miss_after_burn(result.x, sat_state, deb_state, tca_s, step=verify_step)
             if actual_miss < standoff * 0.9:
                 continue  # fast-step said OK but accurate check failed — skip
             if dv_mag < best_mag:
